@@ -1,0 +1,6 @@
+{
+  "name": "auth-like-tony",
+  "description": "Admin sign-in with Better Auth magic links, an ADMIN_EMAIL allowlist, nodemailer over SMTP, Mailpit locally.",
+  "version": "0.1.0",
+  "author": { "name": "tonyjara" }
+}

@@ -1,16 +1,16 @@
 # skills
 
-Skills for Claude Code and Codex. Each skill is a folder with a `SKILL.md`,
-grouped into plugins so the whole repo works as a Claude Code plugin
-marketplace.
+Skills for Claude Code and Codex. Each skill is its own plugin, so you install
+one at a time and never get a bundle you did not ask for.
 
 ## Use them
 
-**Claude Code**
+**Claude Code.** Add the marketplace once, then install each skill you want:
 
 ```
 /plugin marketplace add tonyjara/skills
-/plugin install coding@tonyjara-skills
+/plugin install best-coding-practices@tonyjara-skills
+/plugin install auth-like-tony@tonyjara-skills
 ```
 
 **Codex, or by hand.** Copy (or symlink) a skill folder into
@@ -18,25 +18,35 @@ marketplace.
 
 ```sh
 git clone https://github.com/tonyjara/skills
-ln -s "$PWD/skills/plugins/coding/skills/best-coding-practices" ~/.claude/skills/
+ln -s "$PWD/skills/plugins/auth-like-tony/skills/auth-like-tony" ~/.claude/skills/
 ```
 
 ## What's here
 
-| plugin | skill | what it does |
-|---|---|---|
-| `coding` | `best-coding-practices` | Read first, match the codebase, keep diffs small, verify before claiming done. |
+| skill | what it does |
+|---|---|
+| `best-coding-practices` | Read first, match the codebase, keep diffs small, verify before claiming done. |
+| `auth-like-tony` | Admin sign-in with Better Auth magic links, an `ADMIN_EMAIL` allowlist, nodemailer over SMTP, Mailpit locally, `requireAdmin()` everywhere. |
+
+## Skill or plugin?
+
+A **skill** is a folder with a `SKILL.md`: instructions Claude loads when a task
+matches its description, plus any reference files it points to. A **plugin** is
+the package Claude Code installs; it can carry skills, commands, agents and
+hooks. Here every plugin carries exactly one skill and has the skill's name, so
+"install a plugin" and "install a skill" mean the same thing.
 
 ## Layout
 
 ```
 .claude-plugin/marketplace.json     the list of plugins in this repo
-plugins/<plugin>/
-  .claude-plugin/plugin.json
-  skills/<skill>/
+plugins/<name>/
+  .claude-plugin/plugin.json        name, description, version
+  skills/<name>/
     SKILL.md                        frontmatter (name, description) + instructions
     references/                     loaded only when SKILL.md points to it
 ```
 
-To add a skill, create `plugins/<plugin>/skills/<name>/SKILL.md`. To add a
-plugin, also add an entry to `marketplace.json`.
+To add a skill, create `plugins/<name>/skills/<name>/SKILL.md` and
+`plugins/<name>/.claude-plugin/plugin.json`, add an entry to
+`marketplace.json`, and a row to the table above. One skill per plugin.

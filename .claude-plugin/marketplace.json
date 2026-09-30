@@ -1,14 +1,21 @@
 {
   "name": "tonyjara-skills",
-  "owner": { "name": "tonyjara" },
+  "owner": {
+    "name": "tonyjara"
+  },
   "metadata": {
     "description": "Skills for Claude Code and Codex, shared in the open."
   },
   "plugins": [
     {
-      "name": "coding",
-      "source": "./plugins/coding",
-      "description": "General habits for writing and changing code: read first, match the codebase, keep diffs small, verify before claiming done."
+      "name": "best-coding-practices",
+      "source": "./plugins/best-coding-practices",
+      "description": "Habits for writing and changing code: read first, match the codebase, keep diffs small, verify before claiming done."
+    },
+    {
+      "name": "auth-like-tony",
+      "source": "./plugins/auth-like-tony",
+      "description": "Admin sign-in with Better Auth magic links, an ADMIN_EMAIL allowlist, nodemailer over SMTP, Mailpit locally, requireAdmin() everywhere."
     }
   ]
 }
