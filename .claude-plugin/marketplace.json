@@ -1,0 +1,14 @@
+{
+  "name": "tonyjara-skills",
+  "owner": { "name": "tonyjara" },
+  "metadata": {
+    "description": "Skills for Claude Code and Codex, shared in the open."
+  },
+  "plugins": [
+    {
+      "name": "coding",
+      "source": "./plugins/coding",
+      "description": "General habits for writing and changing code: read first, match the codebase, keep diffs small, verify before claiming done."
+    }
+  ]
+}
