@@ -63,10 +63,12 @@ explain the decisions to the next reader.
 Do these in order; each step is checkable before the next.
 
 1. **Dependencies.** In the web app: `better-auth`, `nodemailer`,
-   `@types/nodemailer` (dev). Known-good: `better-auth ^1.7`, `nodemailer 10`,
-   Next 16, `drizzle-orm ^0.45`. Add `"nodemailer"` (and the Postgres driver) to
-   `serverExternalPackages` in `next.config.ts`, or the bundler will try to pack
-   it.
+   `@types/nodemailer` (dev). At the repo root: `concurrently` (dev), which runs
+   the app and Mailpit together from one `pnpm dev`. On the machine:
+   `brew install mailpit`. Known-good: `better-auth ^1.7`, `nodemailer 10`,
+   `concurrently ^10`, Next 16, `drizzle-orm ^0.45`. Add `"nodemailer"` (and the
+   Postgres driver) to `serverExternalPackages` in `next.config.ts`, or the
+   bundler will try to pack it.
 2. **Env.** Add the block from the reference to `.env.example` and fill `.env`:
    `BETTER_AUTH_SECRET` (`openssl rand -base64 32`), `BETTER_AUTH_URL`,
    `SMTP_HOST/PORT/USER/PASSWORD`, `EMAIL_FROM`, `ADMIN_EMAIL`. In development
@@ -93,7 +95,9 @@ Do these in order; each step is checkable before the next.
    middleware/proxy matcher. Add the `noindex` header for `/(admin|login)/:path*`.
 8. **Scripts.** Root `package.json`: `"mail": "mailpit --smtp 127.0.0.1:1025
    --listen 127.0.0.1:8025"` and `dev` running the app and `pnpm mail` together
-   with `concurrently`.
+   with `concurrently` (exact lines in the reference, section 2). Starting
+   Mailpit by hand is a step people forget, and then the sign-in link goes
+   nowhere; wiring it into `pnpm dev` is what makes the local loop reliable.
 9. **Try it.** `pnpm dev`, open `/login`, enter an address from `ADMIN_EMAIL`,
    open `http://localhost:8025`, click the link, land on `/admin`. Then enter an
    address not on the list: same message on screen, nothing in Mailpit. Then
