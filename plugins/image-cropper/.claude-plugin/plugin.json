@@ -1,0 +1,6 @@
+{
+  "name": "image-cropper",
+  "description": "Image upload field that compresses in the browser, then crops to a fixed aspect with zoom-out-to-fit, re-editable crops and a minimum-width gate.",
+  "version": "0.1.0",
+  "author": { "name": "tonyjara" }
+}

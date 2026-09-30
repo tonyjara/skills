@@ -11,6 +11,7 @@ one at a time and never get a bundle you did not ask for.
 /plugin marketplace add tonyjara/skills
 /plugin install best-coding-practices@tonyjara-skills
 /plugin install auth-like-tony@tonyjara-skills
+/plugin install image-cropper@tonyjara-skills
 ```
 
 **Codex, or by hand.** Copy (or symlink) a skill folder into
@@ -27,6 +28,7 @@ ln -s "$PWD/skills/plugins/auth-like-tony/skills/auth-like-tony" ~/.claude/skill
 |---|---|
 | `best-coding-practices` | Read first, match the codebase, keep diffs small, verify before claiming done. |
 | `auth-like-tony` | Admin sign-in with Better Auth magic links, an `ADMIN_EMAIL` allowlist, nodemailer over SMTP, Mailpit locally, `requireAdmin()` everywhere. |
+| `image-cropper` | Image upload field: compress in the browser, crop at a fixed aspect with zoom-out-to-fit, re-editable crops, min-width gate, wide + square preview. |
 
 ## Skill or plugin?
 
