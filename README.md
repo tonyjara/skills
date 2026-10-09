@@ -12,6 +12,7 @@ one at a time and never get a bundle you did not ask for.
 /plugin install best-coding-practices@tonyjara-skills
 /plugin install auth-like-tony@tonyjara-skills
 /plugin install image-cropper@tonyjara-skills
+/plugin install mobile-web@tonyjara-skills
 ```
 
 **Codex, or by hand.** Copy (or symlink) a skill folder into
@@ -27,8 +28,9 @@ ln -s "$PWD/skills/plugins/auth-like-tony/skills/auth-like-tony" ~/.claude/skill
 | skill | what it does |
 |---|---|
 | `best-coding-practices` | Read first, match the codebase, keep diffs small, verify before claiming done. |
-| `auth-like-tony` | Admin sign-in with Better Auth magic links, an `ADMIN_EMAIL` allowlist, nodemailer over SMTP, Mailpit locally, `requireAdmin()` everywhere. |
+| `auth-like-tony` | Admin sign-in with Better Auth magic links, an `ADMIN_EMAIL` allowlist, nodemailer over SMTP, one shared Mailpit for every local project, `requireAdmin()` everywhere. |
 | `image-cropper` | Image upload field: compress in the browser, crop at a fixed aspect with zoom-out-to-fit, re-editable crops, min-width gate, wide + square preview. |
+| `mobile-web` | Phone-ready web UI: locked viewport scale, no iOS zoom on fields, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards, and a screenshot + overflow audit at phone width. |
 
 ## Skill or plugin?
 
@@ -47,6 +49,7 @@ plugins/<name>/
   skills/<name>/
     SKILL.md                        frontmatter (name, description) + instructions
     references/                     loaded only when SKILL.md points to it
+    scripts/                        run by Claude, from the skill's folder
 ```
 
 To add a skill, create `plugins/<name>/skills/<name>/SKILL.md` and

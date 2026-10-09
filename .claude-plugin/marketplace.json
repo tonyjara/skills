@@ -15,12 +15,17 @@
     {
       "name": "auth-like-tony",
       "source": "./plugins/auth-like-tony",
-      "description": "Admin sign-in with Better Auth magic links, an ADMIN_EMAIL allowlist, nodemailer over SMTP, Mailpit locally, requireAdmin() everywhere."
+      "description": "Admin sign-in with Better Auth magic links, an ADMIN_EMAIL allowlist, nodemailer over SMTP, one shared Mailpit for every local project, requireAdmin() everywhere."
     },
     {
       "name": "image-cropper",
       "source": "./plugins/image-cropper",
       "description": "Image upload field: compress in the browser with compressorjs, crop at a fixed aspect with react-easy-crop, zoom-out-to-fit on white, re-editable crops, minimum-width gate, dual wide/square preview."
+    },
+    {
+      "name": "mobile-web",
+      "source": "./plugins/mobile-web",
+      "description": "Web apps that feel right on phones: locked viewport scale, fields iOS will not zoom into, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards, plus a headless-Chrome audit that signs in through the shared Mailpit and screenshots pages at phone width."
     }
   ]
 }

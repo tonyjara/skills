@@ -1,0 +1,6 @@
+{
+  "name": "mobile-web",
+  "description": "Make a web app feel right on phones (locked viewport scale, 16px fields, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards) and prove it with a headless-Chrome screenshot and overflow audit.",
+  "version": "0.1.0",
+  "author": { "name": "tonyjara" }
+}
