@@ -7,7 +7,7 @@ monorepo. `@project/db` stands for wherever the project keeps `db` and its schem
 Contents:
 
 1. `.env.example` block
-2. Root `package.json` scripts (Mailpit)
+2. The shared Mailpit: setup, scripts, containers, runs on production data
 3. `next.config.ts` bits
 4. `packages/db/src/schema/auth.ts`
 5. `lib/email/send.ts`
@@ -20,6 +20,7 @@ Contents:
 12. Admin layout and sign-out
 13. Proxy matcher and headers
 14. Using `requireAdmin()` in an action
+15. Signing in from a phone over Tailscale (development)
 
 ---
 
@@ -29,14 +30,17 @@ Contents:
 # --- Better Auth (admin login by magic link) --------------------------------
 # Generate with: openssl rand -base64 32
 BETTER_AUTH_SECRET=
+# On this project's own port, the one its `dev` script passes to `next dev --port`.
 BETTER_AUTH_URL=http://localhost:3000
 
 # --- Email ------------------------------------------------------------------
-# Development sends to Mailpit (started by `pnpm dev`, inbox at http://localhost:8025),
-# which needs no user or password. Production is AWS SES over SMTP: .env.prod
-# must set all four, or it falls back to Mailpit's values here.
+# Development sends to the machine's shared Mailpit, a background service every
+# project uses (`pnpm dev` starts it if it is down). Inbox at http://localhost:8025,
+# where `tag:project` shows only this project's mail. It needs no user or password.
+# From a container, SMTP_HOST=host.docker.internal. Production is AWS SES over
+# SMTP: .env.prod must set all four, or it falls back to Mailpit's values here.
 # With SMTP_HOST empty, emails are printed to the server console instead.
-SMTP_HOST=localhost
+SMTP_HOST=127.0.0.1
 SMTP_PORT=1025
 SMTP_USER=
 SMTP_PASSWORD=
@@ -51,20 +55,92 @@ the public origin, `SMTP_HOST=email-smtp.<region>.amazonaws.com`, `SMTP_PORT=587
 user and password are the SES SMTP credentials (not the IAM keys), and
 `EMAIL_FROM` is a verified identity.
 
-## 2. Root `package.json` scripts
+## 2. The shared Mailpit
+
+One Mailpit serves every project on the machine. Once per machine, not per
+project:
+
+```sh
+brew install mailpit
+brew services start mailpit   # now, at every login, and again if it dies
+```
+
+SMTP is then on port 1025 and the inbox on `http://localhost:8025`; projects
+send to `127.0.0.1:1025`. Homebrew's service runs Mailpit with its defaults,
+which listen on every interface, not only `127.0.0.1`, and keep the latest 500
+messages across all projects. Mention both commands in the README next to
+`pnpm dev`.
+
+Root `package.json`:
 
 ```json
 {
   "scripts": {
-    "dev": "concurrently -n web,mail -c blue,magenta \"turbo run dev\" \"pnpm mail\"",
-    "mail": "mailpit --smtp 127.0.0.1:1025 --listen 127.0.0.1:8025"
-  },
-  "devDependencies": { "concurrently": "^10" }
+    "dev": "pnpm mail; turbo run dev",
+    "mail": "nc -z 127.0.0.1 1025 >/dev/null 2>&1 || brew services start mailpit"
+  }
 }
 ```
 
-Single app, no turbo: `"dev": "concurrently -n web,mail -c blue,magenta \"next dev\" \"pnpm mail\""`.
-Mailpit itself: `brew install mailpit`. Mention it in the README next to `pnpm dev`.
+Single app, no turbo: `"dev": "pnpm mail; next dev --port 3000"`, with the
+project's own port (the one in `BETTER_AUTH_URL`). In a turbo monorepo the
+port goes in the web app's own `dev` script.
+
+- `pnpm mail` only ever starts the service, and only when nothing answers on
+  1025. Nothing in a project stops it, so when one project's `pnpm dev` exits,
+  the others keep their inbox. Two projects starting at once both run `brew
+  services start`; the second is told it is already started and carries on.
+- `;` rather than `&&`: on a machine without Homebrew or Mailpit the app still
+  starts, and `brew`'s error at the top of the output says why mail fails.
+- No `concurrently` for mail: Mailpit is not a child of `pnpm dev`, so it is
+  not killed with it.
+
+**Containers.** A service running in Docker sends to the same Mailpit, with
+`SMTP_HOST=host.docker.internal` and `SMTP_PORT=1025` in its environment
+(OrbStack and Docker Desktop both resolve that name to the Mac). No compose
+file has a Mailpit service: one would fight the shared Mailpit for port 1025,
+or split the mail into a second inbox.
+
+**Moving a project off its own Mailpit.** Take `mailpit` out of `dev`, and
+`concurrently` too if Mailpit was its only reason. Point `SMTP_HOST` and
+`SMTP_PORT` at `127.0.0.1:1025` wherever the project had ports of its own
+(`.env`, `.env.example`, dev scripts). Delete any Mailpit service from compose.
+Add the tag (section 5), and give the app its own port if it was on Next's
+default.
+
+**Runs on production data.** Anything running on this machine is development,
+whatever database it points at: `dev:prod`, a rehearsal on a copy of
+production, a one-off script. All of it sends to the shared Mailpit, tagged
+with the project's slug, and none of it sends through SES. No project starts a
+Mailpit of its own for it, on other ports or anywhere else.
+
+`.env.prod` holds the SES credentials, so a script that loads it sets the four
+SMTP variables back to the shared Mailpit itself. Jajotopa's `dev:prod` does it
+in an env file for `env-cmd`:
+
+```json
+"dev:prod": "pnpm mail; env-cmd -f scripts/dev-prod-env.mjs -- next dev --port 3000"
+```
+
+```js
+const env = {
+  ...prod, // .env.prod, parsed
+  // The machine's shared Mailpit instead of SES, so real addresses from the production
+  // database never get mail. Inbox at http://localhost:8025, filter `tag:project`.
+  SMTP_HOST: '127.0.0.1',
+  SMTP_PORT: '1025',
+  SMTP_USER: '',
+  SMTP_PASSWORD: '',
+  // ...and local values for every other way out: webhooks, push, WhatsApp, ad conversions.
+}
+
+export default env
+```
+
+Without a script file, the same values go in front of `env-cmd --no-override -f
+.env.prod`, which then leaves them alone (Holapy's `dev:prod`). Either way it
+runs `pnpm mail` like `dev` does, and `next dev` sets `NODE_ENV=development`,
+so the mail carries the tag.
 
 ## 3. `next.config.ts` bits
 
@@ -204,8 +280,16 @@ export type Email = {
 const globalForMail = globalThis as unknown as { __projectMail?: Transporter }
 
 /**
- * AWS SES over SMTP in production, Mailpit in development (no user or
- * password). Null when there is no SMTP_HOST.
+ * Development mail lands in the Mailpit every project on this machine shares,
+ * so it is tagged to let the inbox be filtered to this project (`tag:project`).
+ * Development only: an unset NODE_ENV sends no tag either, so production mail
+ * never carries it.
+ */
+const devHeaders = process.env.NODE_ENV === 'development' ? { 'X-Tags': 'project' } : undefined
+
+/**
+ * AWS SES over SMTP in production, the machine's shared Mailpit in development
+ * (no user or password). Null when there is no SMTP_HOST.
  */
 function transporter(): Transporter | null {
   const { SMTP_HOST, SMTP_USER, SMTP_PASSWORD } = process.env
@@ -249,12 +333,18 @@ export async function sendEmail(email: Email): Promise<void> {
     return
   }
 
-  await transport.sendMail({ from, ...email })
+  await transport.sendMail({ from, ...email, headers: { ...email.headers, ...devHeaders } })
 }
 ```
 
 The transporter is kept on `globalThis` so hot reloads in development do not
 open a new SMTP pool each time.
+
+The tag's value is the project's slug, the same as the cookie prefix. It is
+keyed on `NODE_ENV === 'development'`, not `!== 'production'`: `next dev` sets
+it, while a process started without it (a worker, a one-off script) sends no
+tag rather than risk tagging production mail. A worker run in development
+gets the tag by setting `NODE_ENV=development` in its dev script.
 
 ## 6. The magic-link email
 
@@ -289,6 +379,9 @@ Copy, es / en:
 - Footer: "El enlace vence en 15 minutos. Si no lo pediste, ignorá este correo." / "The link expires in 15 minutes. If you did not ask for it, ignore this email."
 
 Always give both `text` and `html`. Escape everything interpolated into HTML.
+If the layout also prints the raw link under the button (for clients that block
+buttons), give that paragraph `word-break:break-all;overflow-wrap:anywhere;`: a
+sign-in URL has nowhere to break, and on a phone it runs out of the card.
 
 ## 7. `lib/auth.ts`
 
@@ -593,3 +686,92 @@ export async function deleteItem(itemId: string): Promise<void> {
 A quick audit: `grep -L requireAdmin` over the admin pages and `grep -c
 requireAdmin` against `grep -c "^export async function"` in the actions file
 should match.
+
+## 15. Signing in from a phone over Tailscale (development)
+
+The sign-in link points at `localhost`, which a phone cannot open. With one
+switch in `.env`, the dev server is reached at the computer's Tailscale address
+instead. Changing the link alone is not enough, for three reasons:
+
+- Better Auth builds the link **and the redirect after it** from `baseURL`
+  (`new URL(callbackURL, baseURL)` in the magic-link plugin), so with only the
+  email rewritten the phone signs in and is then sent to `localhost`.
+- Better Auth checks the `Origin` of requests that carry a cookie against
+  `baseURL` and `trustedOrigins`. With `baseURL` on the Tailscale address,
+  signing out on the computer at `localhost` fails unless `localhost` is
+  trusted too.
+- Next 16 blocks the dev server's scripts and HMR for any host but `localhost`,
+  so without `allowedDevOrigins` the page loads on the phone but never hydrates:
+  the form does nothing.
+
+`.env.example`:
+
+```sh
+# Development only: open the dev server from your phone over Tailscale. When on,
+# sign-in links and Better Auth use http://TAILSCALE_IP:<BETTER_AUTH_URL's port>
+# instead of localhost; localhost keeps working on the computer. `tailscale ip -4`
+# prints the address.
+TAILSCALE_ENABLED=false
+TAILSCALE_IP=
+```
+
+`lib/auth.ts`, replacing the `baseURL` line of section 7:
+
+```ts
+/** The origin as written in .env: the computer's own, usually localhost. */
+const localUrl = process.env.BETTER_AUTH_URL ?? siteUrl
+
+/**
+ * Development on a phone over Tailscale: with TAILSCALE_ENABLED on, the
+ * sign-in link and Better Auth's redirect after it use TAILSCALE_IP (same
+ * port) instead of localhost, which the phone cannot reach.
+ */
+function tailscaleUrl(): string | null {
+  if (process.env.TAILSCALE_ENABLED !== 'true') return null
+  const ip = process.env.TAILSCALE_IP
+  if (!ip) throw new Error('TAILSCALE_ENABLED is on but TAILSCALE_IP is empty. Check .env')
+  const url = new URL(localUrl)
+  url.hostname = ip
+  return url.origin
+}
+
+const tailscale = tailscaleUrl()
+
+export const auth = betterAuth({
+  baseURL: tailscale ?? localUrl,
+  // localhost stays trusted, so signing out on the computer still passes the origin check.
+  trustedOrigins: tailscale ? [localUrl] : undefined,
+  // ...the rest of section 7
+})
+```
+
+`next.config.ts`:
+
+```ts
+const nextConfig: NextConfig = {
+  // Next blocks the dev server's scripts for hosts other than localhost; this lets
+  // a phone on the tailnet load them (see TAILSCALE_ENABLED). Dev only.
+  allowedDevOrigins: process.env.TAILSCALE_IP ? [process.env.TAILSCALE_IP] : [],
+}
+```
+
+Notes:
+
+- If the project validates its env in one module (zod), do the swap there
+  instead, with `TAILSCALE_ENABLED: z.stringbool().default(false)`, and
+  overwrite the app's URL variable itself. Then every link the app emails
+  follows, not only sign-in, and keep the original in a second field for
+  `trustedOrigins`. That is how Jajotopa does it (`env/server.ts`).
+- Other links built from the site's URL (an email layout's home link) keep
+  pointing at `localhost` with the version above. Harmless for signing in;
+  swap them too if the phone should follow them.
+- `next dev` loads `.env.local` and fills in any variable not already set. So a
+  `dev:prod` script that loads `.env.prod` through `env-cmd` still picks up
+  `TAILSCALE_*` from `.env.local`, and the switch works there too (on whatever
+  port that script uses). Its email still goes to the shared Mailpit, never SES
+  (section 2), so a link with the Tailscale address reaches nobody.
+- The phone only follows the link if it can open the email, in the shared
+  inbox (search `tag:project`). `tailscale serve --bg --http=8025
+  http://127.0.0.1:8025` should publish the inbox on the tailnet at
+  `http://<tailscale ip>:8025` (not tried yet; `tailscale serve reset` undoes
+  it).
