@@ -1,6 +1,6 @@
 ---
 name: mobile-web
-description: Make a web app feel right on phones (Next.js, Tailwind v4, shadcn/Radix, or any stack) and prove it with screenshots. Covers locking the viewport scale, fields that do not trigger iOS zoom, safe-area insets, dialogs as bottom sheets, nav and tab rows that scroll instead of wrapping, tables that become cards, buttons whose labels wrap, compact phone spacing, and a headless-Chrome audit (scripts/mobile-shots.mjs) that signs in through the shared Mailpit, screenshots pages at phone width and reports anything wider than the screen and any field iOS would zoom into. Load this whenever a page, panel, dashboard, form, table or dialog looks bad, cramped, zoomed, cut off or overflowing on a phone; whenever someone says mobile, responsive, iPhone, Android, Safari, touch, pinch, safe area, or "make it work on my phone"; and before shipping any web UI that people will open on a phone, even if they only ask to "check the layout".
+description: Make a web app feel right on phones (Next.js, Tailwind v4, shadcn/Radix, or any stack) and prove it with screenshots. Covers locking the viewport scale, fields that do not trigger iOS zoom, safe-area insets, boxed form/panel sections that unbox below `sm:` so page gutter and card padding don't stack, dialogs as bottom sheets, nav and tab rows that scroll instead of wrapping, tables that become cards, buttons whose labels wrap, compact phone spacing, and a headless-Chrome audit (scripts/mobile-shots.mjs) that signs in through the shared Mailpit, screenshots pages at phone width and reports anything wider than the screen, any field iOS would zoom into, and any field squeezed narrow by stacked padding. Load this whenever a page, panel, dashboard, form, table or dialog looks bad, cramped, zoomed, cut off or overflowing on a phone; whenever someone says mobile, responsive, iPhone, Android, Safari, touch, pinch, safe area, or "make it work on my phone"; and before shipping any web UI that people will open on a phone, even if they only ask to "check the layout".
 ---
 
 # Mobile web: making a web panel feel like an app on a phone
@@ -22,8 +22,9 @@ fix lives in the primitives (button, input, dialog, tabs, table, shell), not in 
    spacing tokens), then the handful of pages with their own layout bugs.
 3. **Re-run the audit with `--label after` at 390 and 360 wide, then once with
    `--desktop`** (1280) so the desktop did not change. "Done" means: `scrollWidth ===
-   viewport` on every page, no text overflow, no field under 16px, every dialog fits and
-   scrolls inside, and the desktop screenshots look as before.
+   viewport` on every page, no text overflow, no field under 16px, no field flagged
+   `narrow` (stacked card padding), every dialog fits and scrolls inside, and the desktop
+   screenshots look as before.
 
 ## The audit script
 
@@ -113,6 +114,9 @@ route instead (Jajotopa):
 - `text` is a leaf element whose text is wider than its own box: a label running out of
   a button, an email or URL that cannot break.
 - `zoom` is a text field under 16px on a phone (see Fields).
+- `narrow` is a field that sits alone in its row but is much narrower than the viewport —
+  padding stacking from a boxed section on top of the page gutter (see Boxed sections
+  above). A field sharing its row with another (a 2-column grid) is not flagged.
 - `viewport meta` is printed for the first page and whenever a page differs; compare it
   with Viewport and zoom below.
 
@@ -233,6 +237,39 @@ and flex items collapse to one character per line.
   smaller number (`text-3xl sm:text-4xl`); five full-width cards push the content a whole
   screen down.
 - **Phone-shaped previews, maps, charts**: `w-full max-w-[380px]`, never a fixed width.
+
+### Boxed sections on narrow phones
+
+A form or panel built from sections, each its own card (ring, background, shadow,
+rounded corners, and its own horizontal padding) stacks that padding on top of the
+page's gutter below `sm:`. On a 360–390px phone, a 16px page gutter plus a 16–20px card
+padding eats 64–72px of width on each side combined — a third of a narrow screen gone
+before the input itself starts. Drop the box below `sm:`: no ring, no background, no
+shadow, no rounding, no horizontal padding, so the page gutter is the only side padding;
+sections stay separated by their titles, vertical spacing (`space-y-6`), or a hairline
+divider. Restore the full card from `sm:` up — this is a mobile-only unboxing, not a
+redesign. Holapy's customer form fixed it this way:
+
+```ts
+const SECTION_CARD =
+  "rounded-none bg-transparent shadow-none ring-0 sm:rounded-xl sm:bg-card sm:shadow-soft sm:ring-1 sm:ring-border/80";
+const SECTION_PX = "px-0 sm:px-(--card-spacing)";
+```
+
+```tsx
+<Card className={SECTION_CARD}>
+  <CardHeader className={SECTION_PX}>
+    <CardTitle>Quién es</CardTitle>
+  </CardHeader>
+  <CardContent className={`${SECTION_PX} grid gap-4 sm:grid-cols-2`}>
+    {/* fields */}
+  </CardContent>
+</Card>
+```
+
+Use the same `SECTION_CARD`/`SECTION_PX` pair on every boxed-section form or panel, not
+just one; a `CardFooter` gets `SECTION_PX` too. The audit script's `narrow` entries (see
+Reading the report) catch a field this still shrinks at 360px.
 
 ### Dialogs and alert dialogs
 

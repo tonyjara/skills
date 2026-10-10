@@ -259,16 +259,23 @@ const OVERFLOW_SCRIPT = `(() => {
     }
   }
   const zoom = [];
+  const narrow = [];
   if (${!desktop}) {
     const fields = 'input:not([type=checkbox],[type=radio],[type=range],[type=color],[type=file],[type=hidden],[type=submit],[type=button],[type=reset],[type=image]), textarea, select, [contenteditable=""], [contenteditable=true]';
-    for (const el of document.querySelectorAll(fields)) {
-      const r = el.getBoundingClientRect();
+    const rects = [...document.querySelectorAll(fields)].map((el) => [el, el.getBoundingClientRect()]).filter(([, r]) => r.width > 0 || r.height > 0);
+    for (const [el, r] of rects) {
       const size = parseFloat(getComputedStyle(el).fontSize);
-      if ((r.width > 0 || r.height > 0) && size < 16) zoom.push({ desc: describe(el), fontSize: size, why: 'zoom' });
+      if (size < 16) zoom.push({ desc: describe(el), fontSize: size, why: 'zoom' });
+      // A field alone in its row is expected to reach near the viewport edge; one that
+      // doesn't, by a lot, is usually the page gutter and a card's own padding stacking.
+      const midY = r.top + r.height / 2;
+      const sharesRow = rects.some(([other, or]) => other !== el && Math.abs((or.top + or.height / 2) - midY) < 4 && or.left !== r.left);
+      const waste = vw - r.width;
+      if (!sharesRow && waste > 56) narrow.push({ desc: describe(el), width: Math.round(r.width), waste: Math.round(waste), why: 'narrow' });
     }
   }
   const viewport = document.querySelector('meta[name=viewport]')?.content ?? null;
-  return JSON.stringify({ vw, sw, viewport, bad: bad.slice(0, 30), zoom: zoom.slice(0, 10), docHeight: document.documentElement.scrollHeight });
+  return JSON.stringify({ vw, sw, viewport, bad: bad.slice(0, 30), zoom: zoom.slice(0, 10), narrow: narrow.slice(0, 10), docHeight: document.documentElement.scrollHeight });
 })()`;
 
 // Fills "{email}" and "{next}" anywhere in the request body of the settings.
@@ -401,6 +408,7 @@ async function main() {
   const report = [];
   let overflowing = 0;
   let zooming = 0;
+  let narrowing = 0;
   let lastViewport;
   for (const u of urls) {
     const [path, ...steps] = u.split("|");
@@ -427,20 +435,22 @@ async function main() {
     report.push({ url: u, href, file, ...ov });
     if (ov.sw > ov.vw) overflowing++;
     if (ov.zoom.length) zooming++;
+    if (ov.narrow.length) narrowing++;
     if (ov.viewport !== lastViewport) console.log(`\nviewport meta: ${ov.viewport ?? "MISSING"}`);
     lastViewport = ov.viewport;
     console.log(`\n== ${u}  →  ${href}\n   file ${file}\n   viewport ${ov.vw} scrollWidth ${ov.sw}${ov.sw > ov.vw ? "  <-- WIDER THAN THE SCREEN" : ""} height ${ov.docHeight}`);
     for (const b of ov.bad) console.log(`   ${b.why.padEnd(6)} right=${b.right} w=${b.width} sw=${b.scrollWidth}/${b.clientWidth}  ${b.desc}`);
     for (const z of ov.zoom) console.log(`   zoom   font-size=${z.fontSize}px  ${z.desc}`);
+    for (const n of ov.narrow) console.log(`   narrow width=${n.width} waste=${n.waste}px  ${n.desc}`);
   }
   writeFileSync(join(dir, "report.json"), JSON.stringify(report, null, 2));
-  console.log(`\n${report.length} pages, ${overflowing} wider than the screen${desktop ? "" : `, ${zooming} with fields under 16px`}`);
+  console.log(`\n${report.length} pages, ${overflowing} wider than the screen${desktop ? "" : `, ${zooming} with fields under 16px, ${narrowing} with fields narrowed by stacked padding`}`);
   // Closed rather than killed, so the profile writes the session cookie to disk for the next run.
   cdp.send("Browser.close").catch(() => {});
   for (let i = 0; i < 25 && chrome.exitCode === null && chrome.signalCode === null; i++) await sleep(200);
   ws.close();
   chrome.kill();
-  if (strict && (overflowing || zooming)) process.exit(1);
+  if (strict && (overflowing || zooming || narrowing)) process.exit(1);
 }
 
 process.on("SIGINT", () => {
