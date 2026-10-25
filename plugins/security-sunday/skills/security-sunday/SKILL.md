@@ -138,8 +138,8 @@ check every brief entry that names one of your deps against the lockfile by hand
   (no breaking notes that touch our code, all checks pass). Everything else goes in the report
   under "majors left", with one line on what it would take. Read the peer ranges first
   (`npm view <pkg>@<v> peerDependencies`): a wrapper often caps the major (typescript-eslint 8.72
-  allows TypeScript < 6.1, trpc-to-openapi 3.3 wants zod-openapi ^5), and that is "blocked
-  upstream", not work left.
+  allows TypeScript < 6.1, trpc-to-openapi 3.3 wants zod-openapi ^5, eslint-config-next's react, import and jsx-a11y
+  plugins cap eslint at 9), and that is "blocked upstream", not work left.
 - **Transitive CVE with no fixed parent:** an override (`overrides` in `pnpm-workspace.yaml` or
   `pnpm.overrides`; npm `overrides`) to the fixed version, with a comment naming the CVE. Remove
   overrides that are no longer needed. A parent that is unmaintained but never loads the
@@ -150,7 +150,8 @@ check every brief entry that names one of your deps against the lockfile by hand
   remove it, `pnpm install` again moves the first and drops the second, with no override left.
 - pnpm before 11.28.8 reads `--config.<key>=<number>` as a string (it crashes or idles), so
   put numeric settings in `pnpm-workspace.yaml`. When every agent installs at once the registry
-  is slow: add `fetchTimeout: 600000` there for the run and take it out before committing.
+  is slow: add `fetchTimeout: 600000` (and `fetchRetries`) there for the run and take them out before
+  committing; `minimumReleaseAge` stays.
   To wait on an install, wait on your own process id: `pgrep -f "pnpm update"` also matches
   other agents' runs.
 - **Two-day release age, permanent.** Every project refuses versions published less than 48
@@ -191,7 +192,9 @@ an exact tag must be edited), `node-version` in `.github/workflows/*`, and Bun's
 (`checks`). A failure caused by an update: fix it if small, otherwise revert that one package
 and list it. When a framework moved (Next, React, Vite, TanStack, Electron) or you are unsure,
 start the dev server, load two or three pages (`curl -fsS` or a headless browser), and stop it.
-Flutter: `flutter analyze && flutter test`; say whether the change needs a new app build.
+Flutter: `flutter analyze && flutter test`; say whether the change needs a new app build. An app
+that pins Firebase for iOS (pasapy) also runs `fvm flutter build ios --simulator` after
+`pub upgrade`: it can rewrite `ios/…/Package.resolved`, which goes in the commit.
 
 An update that migrates a database when it starts (pg-boss minors move its schema; a package's
 own migrations) is checked against a scratch database (`createdb <name>_ss_<date>`, migrate,
@@ -226,6 +229,11 @@ By `deploy.target` in the inventory:
 - **dokploy**: the GitHub Actions run is green (`gh run watch`), the Swarm service runs the new
   image (`ssh nytojara-vps docker service ps <service> --no-trunc | head -3`), `health` is 200.
 - **none / app store / releases**: say what the user has to ship by hand.
+
+A project that moved off Vercel may still have its old Vercel project serving the custom domain
+to anyone who asks Vercel's IP, with an unpatched build: `curl --resolve
+<domain>:443:76.76.21.21 https://<domain>/<health>`. If it answers, patch it too
+(`deploy_rollback` in the inventory) or ask the user to remove the domain there.
 
 A failed deploy: report it with the log lines. Rollbacks on the VPS follow `hosts.md`.
 
