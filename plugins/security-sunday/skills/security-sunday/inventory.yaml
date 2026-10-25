@@ -74,12 +74,12 @@ projects:
     gh_account: tonyjara
     branch: main
     push_policy: direct
-    push_notes: Must always stay up. Push is safe (Dokploy auto-deploy is off); deploying the server is a manual Dokploy deploy with downtime (stop-first), so ask first and pick a moment with nothing queued to post. Never start a second dev server or point dev at production.
-    release_age: missing
-    stack: {pm: pnpm@10.28.0, lockfiles: [pnpm-lock.yaml], workspaces: [packages/*, apps/*]}
-    key_deps: {electron: 44.5.1, react: 19.3.0, vite: 7.3.6, "@tanstack/react-start": 1.168.60, drizzle-orm: 0.45.3, "@trpc/server": 11.19.0, postgres: 3.4.9}
-    node: {engines: ">=22", docker: "node:22-bookworm-slim (apps/server)"}
-    deploy: {target: dokploy, services: [platypost-server-haabyc, platypost-db-mxma6m], url: "http://100.71.41.56:7727 (tailnet)", health: "http://100.71.41.56:7727/api/health", trigger: manual, also: "landing platypost.dev on Vercel (probably CLI); Electron app built locally"}
+    push_notes: "Must always stay up. Push is safe (Dokploy auto-deploy is off). Deploying the server is a manual Dokploy deploy (application.deploy, docs/DEPLOY.md) with ~10 s downtime (stop-first; ~1.5 min build with the cache): check nothing is due first (posts.scheduled_at / campaigns.next_run_at, read-only), avoid :20 and 06:00-07:10 UTC, pg_dump first if the schema changes. Never start a second dev server or point dev at production."
+    release_age: set
+    stack: {pm: pnpm@10.34.8, lockfiles: [pnpm-lock.yaml], workspaces: [packages/*, apps/*]}
+    key_deps: {electron: 44.9.3, react: 19.3.1, vite: 7.3.7, "@tanstack/react-start": 1.168.61, drizzle-orm: 0.45.4, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    node: {engines: ">=22.18", docker: "node:22-bookworm-slim (apps/server)"}
+    deploy: {target: dokploy, services: [platypost-server-haabyc, platypost-db-mxma6m], url: "http://100.71.41.56:7727 (tailnet)", health: "loopback only: docker exec <platypost-server container> node -e fetch('http://127.0.0.1:7727/api/health') → connected; or the server.heartbeat setting (build.commit, telegram.polling, scheduler.error)", trigger: manual, also: "landing platypost.dev on Vercel: pnpm --filter @platypost/landing deploy:prod -- -Q ~/.config/vercel-fastermenu (team nytojaras-projects, uploads HEAD); Mac app: pnpm --filter @platypost/desktop install:mac from a worktree of pushed main, then relaunch"}
     checks: {typecheck: pnpm typecheck, lint: null, test: null, build: pnpm build, dev: "pnpm dev (check pnpm dev:status first)"}
 
   - name: shared_landings

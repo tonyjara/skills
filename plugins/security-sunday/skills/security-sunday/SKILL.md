@@ -83,6 +83,11 @@ report the other, do not delete it unasked. Then look for `pubspec.yaml` (Flutte
 `mobile/`), `go.mod`, `pyproject.toml` / `requirements*.txt`, `Package.swift`.
 Use the manager the project pins (`packageManager`): `corepack` or pnpm's own version switch
 picks it; never rewrite a lockfile with another manager or major.
+The Mac's global pnpm is 12: a pin it cannot start ("no @pnpm/exe.darwin-arm64 native binary")
+is usually a half-fetched copy (an interrupted switch): move
+`~/Library/pnpm/package-manager-store/v11/links/@pnpm/exe/<version>` aside and run `pnpm -v`
+again. Until then `npx -y pnpm@<pin>` runs the pinned version. With npm 11,
+`npm view <pkg> time --json` returns an array: read `[0]`.
 
 ### 3. Audit, before changing anything
 
@@ -147,6 +152,13 @@ an exact tag must be edited), `node-version` in `.github/workflows/*`, and Bun's
 and list it. When a framework moved (Next, React, Vite, TanStack, Electron) or you are unsure,
 start the dev server, load two or three pages (`curl -fsS` or a headless browser), and stop it.
 Flutter: `flutter analyze && flutter test`; say whether the change needs a new app build.
+
+Electron apps: on a slow link electron-builder's download of the Electron zip times out after
+10 minutes. Fetch `electron-v<v>-darwin-arm64.zip` and `SHASUMS256.txt` from the GitHub
+release yourself (parallel `curl -r` ranges help), check the sha256, and put both in
+`~/Library/Caches/electron/<sha256 of "https://github.com/electron/electron/releases/download/v<v>">/`.
+To confirm an installed app, launch it once with `--remote-debugging-port=<port>`, read
+`navigator.userAgent` and the page text over CDP, then relaunch it plain.
 
 ### 7. Commit and push
 
