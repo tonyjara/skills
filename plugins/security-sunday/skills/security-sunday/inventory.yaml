@@ -1,0 +1,281 @@
+# Security Sunday inventory. The coordinator updates it after every run from the reports'
+# "Inventory changes". null = unknown, never a guess.
+#
+# push_policy:
+#   direct   push the default branch (it may deploy production: see deploy.trigger)
+#   pr-only  branch security-sunday/<date>, push, gh pr create
+#   ask      commit only if the project allows git; ask the user before pushing
+#   skip     not patched on a Sunday (stale, third-party, superseded); listed in the report
+#
+# gh_account: the account for `GH_TOKEN=$(gh auth token -u <account>)` on gh calls and on
+# pushes to https:// remotes. git@ remotes push with the Mac's SSH key, which is tonyjara.
+#
+# key_deps are what was installed when last checked; the project's lockfile is the truth.
+
+updated: 2026-10-25
+
+projects:
+
+  - name: pasapy
+    path: ~/Desktop/Nyto/pasapy
+    repo: https://github.com/nytojara/pasapy.git
+    gh_account: nytojara
+    branch: main
+    push_policy: direct
+    push_notes: Every push to main builds GHCR images and deploys web (and the collector when it changed) to Dokploy. Vercel also builds every push and is the rollback.
+    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, apps/mobile/pubspec.lock], workspaces: [apps/*, packages/*], flutter: 3.47.7 (.fvmrc)}
+    key_deps: {next: 16.3.6, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.6, "@trpc/server": 11.19.0, postgres: 3.4.9 (patched, patches/postgres@3.4.9.patch)}
+    node: {engines: ">=22", docker: "node:24-slim (apps/web, apps/collector)", ci: "24 (ci.yml)"}
+    deploy: {target: dokploy, services: [pasapy-web-xgcjvr, pasapy-collector-0eig1j], url: "https://pasapy.com", health: "https://pasapy.com/api/health", trigger: push to main}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev, extra: pnpm knip}
+
+  - name: jajotopa
+    path: ~/Desktop/Nyto/jajotopa
+    repo: https://github.com/nytojara/jajotopa.git
+    gh_account: nytojara
+    branch: main
+    push_policy: direct
+    push_notes: Every push to main deploys web + worker to Dokploy. Migrations are not part of the deploy (pnpm db:migrate:prod first). Say whether the iOS app needs a new build (AGENTS.md).
+    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, mobile/pubspec.lock], flutter: "sdk ^3.11.4, no fvm pin"}
+    key_deps: {next: 16.3.4, react: 19.2.8, drizzle-orm: 0.45.2, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
+    node: {docker: "node:24-bookworm-slim", ci: "none (Docker build)"}
+    deploy: {target: dokploy, services: [jajotopa-app-mofydx_web, jajotopa-app-mofydx_worker], url: "https://jajotopa.com", health: "https://jajotopa.com/api/mobile/app-version", trigger: push to main}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}
+
+  - name: holapy
+    path: ~/Desktop/Nyto/holapy
+    repo: https://github.com/ajara08/holapy.git
+    gh_account: ajara08
+    branch: main
+    push_policy: direct
+    push_notes: Push to main = Vercel production. Only ajara08 can see the repo. The holapy-nav stack on the VPS (ops/holapy-nav/) is applied by hand with dokploy-sync.sh, and that needs the user's OK.
+    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml]}
+    key_deps: {"@tanstack/react-start": 1.168.60, vite: 8.3.3, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
+    node: {engines: null, other: "Vercel project setting (not visible locally)"}
+    deploy: {target: vercel, url: "https://holapy.com", health: null, also: "holapy-nav on dokploy, https://rutas.holapy.com/healthz", trigger: push to main}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}
+
+  - name: platypost
+    path: ~/Desktop/Nyto/platypost
+    repo: git@github.com:tonyjara/platypost.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: direct
+    push_notes: Must always stay up. Push is safe (Dokploy auto-deploy is off); deploying the server is a manual Dokploy deploy with downtime (stop-first), so ask first and pick a moment with nothing queued to post. Never start a second dev server or point dev at production.
+    stack: {pm: pnpm@10.28.0, lockfiles: [pnpm-lock.yaml], workspaces: [packages/*, apps/*]}
+    key_deps: {electron: 44.5.1, react: 19.3.0, vite: 7.3.6, "@tanstack/react-start": 1.168.60, drizzle-orm: 0.45.3, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    node: {engines: ">=22", docker: "node:22-bookworm-slim (apps/server)"}
+    deploy: {target: dokploy, services: [platypost-server-haabyc, platypost-db-mxma6m], url: "http://100.71.41.56:7727 (tailnet)", health: "http://100.71.41.56:7727/api/health", trigger: manual, also: "landing platypost.dev on Vercel (probably CLI); Electron app built locally"}
+    checks: {typecheck: pnpm typecheck, lint: null, test: null, build: pnpm build, dev: "pnpm dev (check pnpm dev:status first)"}
+
+  - name: shared_landings
+    path: ~/Desktop/Nyto/shared_landings
+    repo: https://github.com/tonyjara/shared_landings.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: direct
+    push_notes: Push to main deploys each changed app on Vercel (turbo-ignore). The second remote `nytojara` is stale; push origin only.
+    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml], workspaces: [apps/*, packages/*]}
+    key_deps: {next: 16.3.6, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.6, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    node: {}
+    deploy: {target: vercel, url: ["https://yetapatours.com", "https://tonyjara.com", "https://parqueguasu.org"], health: null, trigger: push to main, notes: "Vercel team dyno-f6ce6ee6; the Mac's Vercel CLI is on the bytetify team and cannot see it"}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}
+
+  - name: subignite
+    path: ~/Desktop/Bytetify/subignite
+    repo: git@github.com:subignite/subignite.git
+    gh_account: subignite
+    branch: main
+    push_policy: pr-only
+    push_notes: PR-only (the user's rule). PRs run claude-code-review and security-review; BUGBOT.md has the review rules. Merge = Vercel production. Skip .claude/worktrees/*.
+    stack: {pm: pnpm@10.33.2, lockfiles: [pnpm-lock.yaml, docs/pnpm-lock.yaml], stray: "bun.lock (tracked, stale since 2026-05-03; report it)"}
+    key_deps: {next: 16.2.6, react: 19.2.6, drizzle-orm: 0.45.3, better-auth: 1.7.12, "@trpc/server": 11.17.0, postgres: 3.4.9}
+    node: {ci: "24 (build.yml)", docs_engines: ">=20.0"}
+    deploy: {target: vercel, url: "https://subignite.com", health: "https://subignite.com/api/health", trigger: merge to main}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev}
+
+  - name: fastermenu
+    path: ~/Desktop/Bytetify/fastermenu
+    repo: https://github.com/nytojara/fastermenu.git
+    gh_account: nytojara
+    branch: main
+    push_policy: pr-only
+    push_notes: Changes land as PRs in practice. Merge = Vercel production.
+    stack: {pm: "pnpm (no packageManager pin)", lockfiles: [pnpm-lock.yaml]}
+    key_deps: {next: 16.3.0, react: 19.2.8, drizzle-orm: 0.45.2, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9, remotion: 4.0.470}
+    node: {}
+    deploy: {target: vercel, url: "https://fastermenu.com", health: null, trigger: merge to main}
+    checks: {typecheck: "pnpm exec tsc --noEmit (no script)", lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev}
+
+  - name: bytetify-landing
+    path: ~/Desktop/Bytetify/bytetify-landing
+    repo: git@github.com:Bytetify/landing.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: direct
+    push_notes: Conventional Commits (.cursorrules). Push to main = Vercel production.
+    stack: {pm: "ambiguous: pnpm-lock.yaml (newer) and package-lock.json both tracked; no pin", lockfiles: [pnpm-lock.yaml, package-lock.json]}
+    key_deps: {next: 16.2.12, react: 19.2.8}
+    node: {}
+    deploy: {target: vercel, url: "https://bytetify.com", health: null, trigger: push to main}
+    checks: {typecheck: "pnpm exec tsc --noEmit (no script)", lint: "broken (next lint is gone in Next 16)", test: null, build: pnpm build, dev: pnpm dev}
+
+  - name: rogapy
+    path: ~/Desktop/Nyto/rogapy
+    repo: https://github.com/nytojara/rogapy.git
+    gh_account: nytojara
+    branch: main
+    push_policy: pr-only
+    push_notes: 'CONTRIBUTING.md says never push to or merge into main. No production yet.'
+    stack: {pm: pnpm@11.28.6, lockfiles: [pnpm-lock.yaml], workspaces: [apps/web, apps/worker, apps/crawler, packages/*], flutter: "apps/mobile, sdk ^3.8.0, no lock"}
+    key_deps: {next: 15.5.27, react: 19.3.0, drizzle-orm: 0.45.4, better-auth: 1.7.7, "@trpc/server": 11.19.0, pg: 8.23.1}
+    node: {nvmrc: "22", engines: ">=22.12", docker: "ARG NODE_VERSION=22-bookworm-slim", ci: ".nvmrc"}
+    deploy: {target: none, trigger: CI only}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev}
+
+  - name: kururu
+    path: ~/Desktop/Nyto/kururu
+    repo: git@github.com:tonyjara/kururu.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: ask
+    push_notes: "CLAUDE.md: do not run git commands automatically. Leave the changes uncommitted and list them, unless the user says to commit. Leave the agents' worktrees alone. Releases are v* tags (the /release skill)."
+    stack: {pm: "bun (not pinned; CI uses latest)", lockfiles: [bun.lock, site/bun.lock], workspaces: [server, web, desktop]}
+    key_deps: {electron: 44.3.0, react: "19.3.0 / 19.3.1 (site)", vite: "8.3.0 / 8.3.4 (site)", "@tanstack/react-start": "1.169.3 (site)", pg: 8.23.1}
+    node: {ci: "24 + bun latest"}
+    deploy: {target: github-releases, url: "https://kururu.dev", also: "site on Vercel (kururu-site, probably CLI)", trigger: v* tag}
+    checks: {typecheck: bun run typecheck, lint: null, test: bun test, build: bun run build, dev: bun run dev}
+
+  - name: ghosttown
+    path: ~/Desktop/Nyto/ghosttown
+    repo: git@github.com:tonyjara/ghosttown.git
+    gh_account: tonyjara
+    branch: master
+    push_policy: ask
+    push_notes: master has one unpushed commit of the user's ("mmmm", 2026-09-15); a push would publish it too.
+    stack: {pm: "bun (engines >=1.2.0)", lockfiles: [bun.lock]}
+    key_deps: {}
+    deploy: {target: none}
+    checks: {typecheck: bun run typecheck, lint: null, test: bun test, build: null, dev: bun run dev}
+
+  - name: kururu-styles
+    path: ~/Desktop/Nyto/kururu-styles
+    repo: git@github.com:tonyjara/kururu-styles.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: pr-only
+    push_notes: No dependencies; only the CI Node version (22) to keep current. index.json is regenerated by CI, never by hand.
+    stack: {pm: none}
+    node: {ci: "22 (ci.yml)"}
+    deploy: {target: github, trigger: merge to main}
+    checks: {lint: node tools/validate.mjs, build: node tools/build-index.mjs}
+
+  - name: tile-bandit
+    path: ~/Desktop/Nyto/tile-bandit
+    repo: git@github.com:tonyjara/tile-bandit.git
+    gh_account: tonyjara
+    branch: master
+    push_policy: direct
+    push_notes: Swift, no external dependencies. Only the toolchain to note. Releases are manual (notarized app + Homebrew cask).
+    stack: {pm: swiftpm}
+    deploy: {target: github-releases, trigger: manual}
+    checks: {build: swift build}
+
+  - name: skills
+    path: ~/Desktop/Nyto/skills
+    repo: git@github.com:tonyjara/skills.git
+    gh_account: tonyjara
+    branch: main
+    push_policy: direct
+    push_notes: No dependencies (ioc-check.mjs uses only Node built-ins).
+    stack: {pm: none}
+    deploy: {target: github, trigger: push to main (plugins update from the marketplace)}
+
+  - name: img-benchmark
+    path: ~/Desktop/Nyto/img-benchmark
+    repo: null
+    push_policy: ask
+    push_notes: Not a git repo, local tool. Update in place; nothing to push.
+    stack: {pm: "pnpm (no pin)", lockfiles: [pnpm-lock.yaml]}
+    key_deps: {react: 19.3.0, vite: 8.3.3, hono: "^4.13.13"}
+    deploy: {target: none}
+    checks: {lint: pnpm lint, build: pnpm build, dev: pnpm dev}
+
+  # Not patched on Sundays until the user decides. Listed in every report.
+  - name: yetapatours
+    path: ~/Desktop/Nyto/yetapatours
+    repo: https://github.com/nytojara/yetapatours.git
+    push_policy: skip
+    push_notes: Looks superseded by shared_landings/apps/yetapa (same schema, yetapatours.com is served from there). Last commit 2026-09-30. Ask the user whether to archive it.
+  - name: platy
+    path: ~/Desktop/Bytetify/platy
+    repo: git@github.com:Bytetify/platypus.git
+    push_policy: skip
+    push_notes: Stale since 2025-11, npm. Next 16.0.3 / React 19.2.0 are below the React2Shell fix (CVE-2025-55182). Nothing shows it deployed; confirm, then patch or archive.
+  - name: subignite-recover
+    path: ~/Desktop/Bytetify/subignite-recover
+    push_policy: skip
+    push_notes: Recovery checkout, detached HEAD already in subignite's history. Can be deleted (ask).
+  - name: suno-api
+    path: ~/Desktop/Bytetify/suno-api
+    repo: https://github.com/gcui-art/suno-api.git
+    push_policy: skip
+    push_notes: Third-party clone with local edits, Next 14.1.4. Do not run or expose it.
+
+hosts:
+
+  - name: nytojara-vps
+    aka: MV
+    ssh: nytojara-vps   # Tailscale 100.71.41.56; public 177.7.61.127 with port 22 closed in hPanel
+    ops_folder: ~/Desktop/Nyto/hostinger_nytojara   # its CLAUDE.md wins over hosts.md
+    fallback_access: hPanel browser terminal (always); port 22 from the Mac's IP only, temporarily, if the user opens it
+    os: Ubuntu 24.04.5 LTS, kernel 6.8.0-147-generic
+    unattended_upgrades: "on, Ubuntu security origins, no automatic reboot"
+    held: [cloud-init]
+    must_stay_up: [platypost-server-haabyc, platypost-db-mxma6m]
+    quiet_window_avoid: "06:00-07:10 UTC (backups); Pasapy schedules (see the ops runbook)"
+    runs: [databases-pg18 (Postgres 18.6 + pgvector), pgbouncer, dokploy, dokploy-traefik, pasapy web + collector, jajotopa web + worker, holapy-nav (nginx, valhalla, vroom, pmtiles), platypost server + db]
+    versions:   # as of 2026-10-25
+      docker: 29.9.1          # 29.9.2 in apt
+      containerd: 2.4.2       # newer package build in apt
+      runc: 1.5.2
+      dokploy: v0.30.8
+      traefik: 3.6.25
+      tailscale: 1.104.1      # 1.104.2 in apt
+      openssh: 9.6p1 Ubuntu-3ubuntu13.20
+      openssl: 3.0.13 (Ubuntu build)
+      fail2ban: 1.0.2
+      postgres: {pg18: 18.6, platypost-db: 18.6, dokploy-postgres: 16.15}
+      pgbouncer: 1.25.2
+      node_in_containers: {jajotopa: 24.22.1, pasapy-web: 24.22.1, pasapy-collector: 24.22.1, platypost-server: 22.23.4, dokploy: 24.4.0}
+      container_os: Debian 12 bookworm (apps), Debian 13 trixie (postgres)
+
+  - name: omarchy
+    ssh: omarchy
+    status: lost   # power cut 2026-10-22, presumed destroyed; workloads moved to nytojara-vps
+    notes: Remove from ~/.ssh/config and the tailnet once the user confirms.
+
+mac:
+  os: macOS 27.0.1
+  node: {version: 24.18.0, installed_by: "pnpm global (pnpm add -g node@…), ~/Library/pnpm/bin/node"}
+  package_managers: {pnpm: 12.10.1, npm: 12.0.1, bun: 1.4.2}
+  infra_tools:   # as of 2026-10-25
+    homebrew: 7.0.10
+    tailscale: 1.102.3 (Tailscale.app, standalone)
+    openssh: 10.3p1 (macOS)
+    gh: 2.102.0 (brew; accounts nytojara, tonyjara, ajara08, subignite)
+    stripe: 1.51.1 (brew)
+    claude_code: 2.1.310 (native installer)
+    codex: 0.146.0 (standalone)
+    orbstack: 2.2.4 (brew cask)
+    cloudflared: 2023.1.0 (brew)   # three years old
+    op: 2.30.3 (brew cask)
+    vercel: 62.2.0 (pnpm global)
+    osv_scanner: not installed
+  other: {go: 1.26.0, flutter: "fvm (3.41.0, 3.44.8, 3.47.7, stable)", python: 3.9.4 (python.org framework), postgres_app: [18]}
+
+# Adding a project: copy an entry above, fill every key from the repo (lockfiles, packageManager,
+# .nvmrc / engines / Dockerfile / CI Node versions, deploy target and health URL, the check
+# commands, the push rule from CLAUDE.md / AGENTS.md / CONTRIBUTING.md), and set gh_account from
+# who can push (`GH_TOKEN=$(gh auth token -u <acct>) gh repo view <repo> --json viewerPermission`).
+# Adding a host: see the end of hosts.md.

@@ -13,6 +13,7 @@ one at a time and never get a bundle you did not ask for.
 /plugin install auth-like-tony@tonyjara-skills
 /plugin install image-cropper@tonyjara-skills
 /plugin install mobile-web@tonyjara-skills
+/plugin install security-sunday@tonyjara-skills
 ```
 
 **Codex, or by hand.** Copy (or symlink) a skill folder into
@@ -31,6 +32,7 @@ ln -s "$PWD/skills/plugins/auth-like-tony/skills/auth-like-tony" ~/.claude/skill
 | `auth-like-tony` | Admin sign-in with Better Auth magic links, an `ADMIN_EMAIL` allowlist, nodemailer over SMTP, one shared Mailpit for every local project, `requireAdmin()` everywhere. |
 | `image-cropper` | Image upload field: compress in the browser, crop at a fixed aspect with zoom-out-to-fit, re-editable crops, min-width gate, wide + square preview. |
 | `mobile-web` | Phone-ready web UI: locked viewport scale, no iOS zoom on fields, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards, and a screenshot + overflow audit at phone width. |
+| `security-sunday` | Weekly patch run: a dated CVE brief, then per project audit, patch/minor updates, Node bumps, checks, one commit, deploy check and a security log; the VPS and Mac procedures, an inventory of every project and host, and a Sunday report. |
 
 ## Skill or plugin?
 

@@ -26,6 +26,11 @@
       "name": "mobile-web",
       "source": "./plugins/mobile-web",
       "description": "Web apps that feel right on phones: locked viewport scale, fields iOS will not zoom into, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards, plus a headless-Chrome audit that signs in through the shared Mailpit and screenshots pages at phone width."
+    },
+    {
+      "name": "security-sunday",
+      "source": "./plugins/security-sunday",
+      "description": "Weekly patch run: a dated CVE brief, then per project audit, patch/minor updates, Node runtime bumps, checks, one commit, deploy check and a log; plus the VPS and Mac procedures, an inventory of projects and hosts, and one report per Sunday."
     }
   ]
 }
