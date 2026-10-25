@@ -22,6 +22,7 @@ only the checkout.
 | `report-template.md` | The per-project report and the Sunday summary |
 | `briefs/<date>-iocs.txt` | That Sunday's known-bad npm packages, one `name@version` (or bare `name`) per line |
 | `scripts/ioc-check.mjs` | Finds IOC entries in every lockfile of a repo (pnpm, npm, bun, yarn), installs nothing |
+| `scripts/newest.mjs` | Newest version of each package in its own major, and the newest one past the 48-hour release age |
 | `scripts/ioc-fetch.sh` | Builds an IOC list from GitHub's npm malware advisories since a date, plus named GHSAs |
 
 ## Who does what
@@ -78,7 +79,10 @@ commands", migration rules). Not in the inventory yet: add it to your report (se
   versions (keeping only its own extra entries), `pnpm-workspace.yaml` and
   `docs/security/log.md` are copied as they are, the lockfile starts from the default branch's
   and `pnpm install` adds the branch's extras. Identical files merge cleanly when the branch
-  comes back. Push the branch; never merge it.
+  comes back. Push the branch; never merge it. In a `pr-only` repo that merges PRs with merge
+  commits, merge the security branch into the long-lived branch instead (manifests take the
+  PR's versions, the lockfile is the PR's plus `pnpm install`): a later commit on the PR then
+  cannot conflict, and merging the default branch in after the PR lands is clean.
 - gh account: never `gh auth switch` (other agents share it). Per command:
   `GH_TOKEN=$(gh auth token -u <gh_account>) gh …`, and the same prefix on `git push` for an
   `https://` remote (git's credential helper is `gh`). `git@` remotes push with the Mac's SSH key.
@@ -124,12 +128,17 @@ check every brief entry that names one of your deps against the lockfile by hand
   style: exact stays exact, `^` stays `^`. npm: `npm update` + `npm outdated`; bun:
   `bun update` + `bun outdated`. `pnpm update -r` rewrites major-only ranges (`^4` becomes
   `^4.3.3`): put them back. Folders outside the workspace that get copied (a `templates/`
-  scaffold) are never updated: bump their pins by hand to match the apps.
+  scaffold) are never updated: bump their pins by hand to match the apps. Where every pin is
+  exact, `pnpm update` changes nothing direct: `node <skill>/scripts/newest.mjs name@current …`
+  lists the version to take (`pnpm outdated --format json` mixes `[WARN]` lines into stdout).
 - **Vendored copies keep their old version strings.** Next 16.4.3 bundles React as
   `19.3.0-canary-…` with the 19.3.1 fix inside: check for the fixed code, not the version.
 - **Majors** only when a CVE is fixed only in the new major, or when the change is trivial
   (no breaking notes that touch our code, all checks pass). Everything else goes in the report
-  under "majors left", with one line on what it would take.
+  under "majors left", with one line on what it would take. Read the peer ranges first
+  (`npm view <pkg>@<v> peerDependencies`): a wrapper often caps the major (typescript-eslint 8.72
+  allows TypeScript < 6.1, trpc-to-openapi 3.3 wants zod-openapi ^5), and that is "blocked
+  upstream", not work left.
 - **Transitive CVE with no fixed parent:** an override (`overrides` in `pnpm-workspace.yaml` or
   `pnpm.overrides`; npm `overrides`) to the fixed version, with a comment naming the CVE. Remove
   overrides that are no longer needed. A parent that is unmaintained but never loads the
@@ -182,6 +191,11 @@ an exact tag must be edited), `node-version` in `.github/workflows/*`, and Bun's
 and list it. When a framework moved (Next, React, Vite, TanStack, Electron) or you are unsure,
 start the dev server, load two or three pages (`curl -fsS` or a headless browser), and stop it.
 Flutter: `flutter analyze && flutter test`; say whether the change needs a new app build.
+
+An update that migrates a database when it starts (pg-boss minors move its schema; a package's
+own migrations) is checked against a scratch database (`createdb <name>_ss_<date>`, migrate,
+seed, run, drop it), never the shared dev database the other branches use. Say in the PR what
+migrates and what the next agent runs after the merge.
 
 Electron apps: on a slow link electron-builder's download of the Electron zip times out after
 10 minutes. Fetch `electron-v<v>-darwin-arm64.zip` and `SHASUMS256.txt` from the GitHub

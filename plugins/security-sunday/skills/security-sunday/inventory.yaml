@@ -146,13 +146,15 @@ projects:
     gh_account: nytojara
     branch: main
     push_policy: pr-only
-    push_notes: 'CONTRIBUTING.md says never push to or merge into main. No production yet.'
-    release_age: missing
-    stack: {pm: pnpm@11.28.6, lockfiles: [pnpm-lock.yaml], workspaces: [apps/web, apps/worker, apps/crawler, packages/*], flutter: "apps/mobile, sdk ^3.8.0, no lock"}
-    key_deps: {next: 15.5.27, react: 19.3.0, drizzle-orm: 0.45.4, better-auth: 1.7.7, "@trpc/server": 11.19.0, pg: 8.23.1}
+    push_notes: "CONTRIBUTING.md says never push to or merge into main; the user merges PRs with merge commits. No production yet. Paused: never run `pnpm crawler` or hit InfoCasas, ParaguayInmo or Mercado Libre, send no emails. Other sessions keep the main checkout on their feature branches (PRs #3, #4 on 2026-10-25): work in worktrees. The shared dev database `rogapy` (Postgres.app) is never migrated by an unmerged branch: use a scratch database."
+    branches:
+      - {name: phase-1-crawler, policy: "paused, no PR: merge the security PR branch into it (SKILL.md step 1, merge-commit repo), push directly; CI runs only on PRs and pushes to main", test: "RUN_DB_TESTS=1 pnpm --filter @rogapy/crawler test (19 tests, offline: 127.0.0.1 servers, .invalid hosts)"}
+    release_age: set
+    stack: {pm: pnpm@11.28.8, lockfiles: [pnpm-lock.yaml], workspaces: [apps/web, apps/worker, apps/crawler, packages/*], flutter: "apps/mobile, sdk ^3.8.0, no lock", overrides: "next>postcss, @esbuild-kit/core-utils>esbuild (pnpm-workspace.yaml)"}
+    key_deps: {next: 15.5.28, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, pg: 8.23.1, pg-boss: "12.38.0 (minors migrate its schema)", typescript: 6.0.3, eslint: 10.13.0}
     node: {nvmrc: "22", engines: ">=22.12", docker: "ARG NODE_VERSION=22-bookworm-slim", ci: ".nvmrc"}
     deploy: {target: none, trigger: CI only}
-    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, extra: "pnpm format:check; pnpm db:check; pnpm openapi --check; pnpm i18n:arb --check", db: "scratch DB: pnpm db:migrate, pnpm --filter @rogapy/db check-audit, pnpm db:seed twice, pnpm worker tick, RUN_DB_TESTS=1 pnpm --filter @rogapy/api --filter @rogapy/worker test", dev: "pnpm dev --port 3020 (es has no prefix: /, /sign-in, /en/sign-in, /ops)"}
 
   - name: kururu
     path: ~/Desktop/Nyto/kururu
