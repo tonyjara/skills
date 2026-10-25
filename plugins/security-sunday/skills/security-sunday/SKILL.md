@@ -99,7 +99,8 @@ The Mac's global pnpm is 12: a pin it cannot start ("no @pnpm/exe.darwin-arm64 n
 is usually a half-fetched copy (an interrupted switch): move
 `~/Library/pnpm/package-manager-store/v11/links/@pnpm/exe/<version>` aside and run `pnpm -v`
 again. Until then `npx -y pnpm@<pin>` runs the pinned version. With npm 11,
-`npm view <pkg> time --json` returns an array: read `[0]`.
+`npm view <pkg> time --json` returns an array: read `[0]`. macOS has no `timeout`: `perl -e 'alarm shift; exec @ARGV' 60 <cmd>`
+(exit 142 when it fires).
 
 ### 3. Audit, before changing anything
 
