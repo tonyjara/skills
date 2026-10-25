@@ -112,12 +112,21 @@ Also look for worm droppings: hooks you do not recognise in `.claude/settings*.j
 Keep the counts (critical / high / moderate) for the log. An IOC hit is an incident, not an
 update: stop, tell the user, and do not run install or any script in that repo.
 
+The audits only know GitHub's global database. An advisory published in the package's own repo
+(better-auth GHSA-965c-763c-88jm, React GHSA-xqc2-xf4c-x3h3 on 2026-10-25) is missed by both:
+check every brief entry that names one of your deps against the lockfile by hand
+(`gh api repos/<owner>/<repo>/security-advisories/<GHSA id>` gives the affected ranges).
+
 ### 4. Update
 
 - **Patch and minor: all of them.** `pnpm update -r` (within ranges), then `pnpm outdated -r`
   for pinned versions and bump each to the newest of its own major. Keep each specifier's
   style: exact stays exact, `^` stays `^`. npm: `npm update` + `npm outdated`; bun:
-  `bun update` + `bun outdated`.
+  `bun update` + `bun outdated`. `pnpm update -r` rewrites major-only ranges (`^4` becomes
+  `^4.3.3`): put them back. Folders outside the workspace that get copied (a `templates/`
+  scaffold) are never updated: bump their pins by hand to match the apps.
+- **Vendored copies keep their old version strings.** Next 16.4.3 bundles React as
+  `19.3.0-canary-…` with the 19.3.1 fix inside: check for the fixed code, not the version.
 - **Majors** only when a CVE is fixed only in the new major, or when the change is trivial
   (no breaking notes that touch our code, all checks pass). Everything else goes in the report
   under "majors left", with one line on what it would take.
@@ -132,6 +141,8 @@ update: stop, tell the user, and do not run install or any script in that repo.
 - pnpm before 11.28.8 reads `--config.<key>=<number>` as a string (it crashes or idles), so
   put numeric settings in `pnpm-workspace.yaml`. When every agent installs at once the registry
   is slow: add `fetchTimeout: 600000` there for the run and take it out before committing.
+  To wait on an install, wait on your own process id: `pgrep -f "pnpm update"` also matches
+  other agents' runs.
 - **Two-day release age, permanent.** Every project refuses versions published less than 48
   hours ago (compromised releases are usually pulled within a day). Add it if it is missing,
   set it explicitly even where the manager has a default (pnpm 11 defaults to one day), and

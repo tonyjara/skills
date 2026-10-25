@@ -90,13 +90,13 @@ projects:
     gh_account: tonyjara
     branch: main
     push_policy: direct
-    push_notes: Push to main deploys each changed app on Vercel (turbo-ignore). The second remote `nytojara` is stale; push origin only.
+    push_notes: Push to main deploys each changed app on Vercel (all three projects skip unchanged apps with `npx turbo-ignore`; parqueguasu had no ignore step before 2026-10-25). origin is the only remote; the old nytojara copy is archived. Prod migrations (`pnpm --filter <app> db:migrate:prod`) are allowed without asking.
     release_age: set
-    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml], workspaces: [apps/*, packages/*]}
-    key_deps: {next: 16.3.6, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.6, "@trpc/server": 11.19.0, postgres: 3.4.9}
-    node: {}
-    deploy: {target: vercel, url: ["https://yetapatours.com", "https://tonyjara.com", "https://parqueguasu.org"], health: null, trigger: push to main, notes: "Vercel team dyno-f6ce6ee6; the Mac's Vercel CLI is on the bytetify team and cannot see it"}
-    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}
+    stack: {pm: pnpm@11.28.8, lockfiles: [pnpm-lock.yaml], workspaces: [apps/*, packages/*], outside_workspace: "templates/landing (copied as-is by `pnpm new`): pnpm update never touches it, so sync its pins to the apps by hand"}
+    key_deps: {next: 16.4.3, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    node: {vercel: "24.x project setting on all three; nothing pinned in the repo"}
+    deploy: {target: vercel, url: ["https://yetapatours.com", "https://tonyjara.com", "https://parqueguasu.org"], health: "/api/auth/ok on each URL ({\"ok\":true})", trigger: push to main, vercel_cli: "vercel -Q ~/.config/vercel-dyno --scope dyno-f6ce6ee6 --project <app> (account tonyjara)", notes: "Vercel team dyno-f6ce6ee6 (MV); installs with the packageManager pin; PostHog vars on Production and Preview"}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm -r --if-present test, build: pnpm build, dev: pnpm dev}
 
   - name: subignite
     path: ~/Desktop/Bytetify/subignite
