@@ -246,7 +246,7 @@ By `deploy.target` in the inventory:
 A project that moved off Vercel may still have its old Vercel project serving the custom domain
 to anyone who asks Vercel's IP, with an unpatched build: `curl --resolve
 <domain>:443:76.76.21.21 https://<domain>/<health>`. If it answers, patch it too
-(`deploy_rollback` in the inventory) or ask the user to remove the domain there.
+or ask the user to delete that project (pasapy's was, on 2026-10-25).
 
 A failed deploy: report it with the log lines. Rollbacks on the VPS follow `hosts.md`.
 
