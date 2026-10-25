@@ -47,10 +47,11 @@ projects:
     gh_account: nytojara
     branch: main
     push_policy: direct
-    push_notes: Every push to main deploys web + worker to Dokploy. Migrations are not part of the deploy (pnpm db:migrate:prod first). Say whether the iOS app needs a new build (AGENTS.md).
-    release_age: missing
-    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, mobile/pubspec.lock], flutter: "sdk ^3.11.4, no fvm pin"}
-    key_deps: {next: 16.3.4, react: 19.2.8, drizzle-orm: 0.45.2, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
+    push_notes: Every push to main deploys web + worker to Dokploy. Migrations are not part of the deploy (pnpm db:migrate:prod first). Say whether the iOS app needs a new build (AGENTS.md). Tony is consulted before any app build; the TestFlight upload needs his Transporter session (no App Store Connect API key on the Mac).
+    release_age: set
+    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, mobile/pubspec.lock], flutter: "sdk ^3.11.4, no fvm pin (builds with fvm global), Firebase iOS via CocoaPods (Firebase 13 / firebase_core 5 = the move to SPM)"}
+    key_deps: {next: 16.4.3, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    overrides: {"@esbuild-kit/core-utils>esbuild": ^0.25.12}
     node: {docker: "node:24-bookworm-slim", ci: "none (Docker build)"}
     deploy: {target: dokploy, services: [jajotopa-app-mofydx_web, jajotopa-app-mofydx_worker], url: "https://jajotopa.com", health: "https://jajotopa.com/api/mobile/app-version", trigger: push to main}
     checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}

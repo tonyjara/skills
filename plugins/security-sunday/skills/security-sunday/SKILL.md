@@ -194,7 +194,13 @@ and list it. When a framework moved (Next, React, Vite, TanStack, Electron) or y
 start the dev server, load two or three pages (`curl -fsS` or a headless browser), and stop it.
 Flutter: `flutter analyze && flutter test`; say whether the change needs a new app build. An app
 that pins Firebase for iOS (pasapy) also runs `fvm flutter build ios --simulator` after
-`pub upgrade`: it can rewrite `ios/…/Package.resolved`, which goes in the commit.
+`pub upgrade`: it can rewrite `ios/…/Package.resolved`, which goes in the commit. Every app with
+an `ios/` folder builds once (`flutter build ios --no-codesign --release`): analyze passes while
+`pod install` fails. "Specs … required a higher minimum deployment target" right after a plugin
+bump usually means `Podfile.lock` still pins the old pod (jajotopa: Firebase 12.19.0 against the
+plugin's 12.19.3): `cd ios && pod update <Pod> --no-repo-update`, never a raised target, and
+commit `Podfile.lock`. `--no-repo-update` also gets past the CDN's "Error in the HTTP2 framing
+layer" (trunk redirects to `cdn.jsdelivr.net/cocoa/Specs/…`; `curl -L` fetches a missing spec).
 
 An update that migrates a database when it starts (pg-boss minors move its schema; a package's
 own migrations) is checked against a scratch database (`createdb <name>_ss_<date>`, migrate,
@@ -228,6 +234,8 @@ By `deploy.target` in the inventory:
   `.env.local`: link a scratch folder, never the repo, and delete that file.
 - **dokploy**: the GitHub Actions run is green (`gh run watch`), the Swarm service runs the new
   image (`ssh nytojara-vps docker service ps <service> --no-trunc | head -3`), `health` is 200.
+  During the rollover `journalctl -t <tag>` mixes the old task's lines with the new one's (the old
+  worker's SIGTERM reads like the new one dying): read `docker logs` of the new container.
 - **none / app store / releases**: say what the user has to ship by hand.
 
 A project that moved off Vercel may still have its old Vercel project serving the custom domain
