@@ -28,8 +28,9 @@ OrbStack runs Docker, Flutter comes from fvm (`~/fvm`).
   npm-global leftovers (`npm update -g`). Check each against the brief's IOC block first.
 - **Infrastructure tools** (Tailscale, gh, Stripe CLI, Claude Code, Codex, OrbStack and the
   rest): one at a time, as in section 3.
-- **Flutter**: `fvm releases`, then `fvm install stable` / `fvm global stable` only if the brief
-  has a Flutter or Dart fix; projects pin their own version.
+- **Flutter**: `fvm releases`, then `fvm install <v>` / `fvm global <v>` only if the brief
+  has a Flutter or Dart fix; projects pin their own version. Switch only when `ps` shows no
+  `flutter`/`fvm` build running, then `flutter doctor`. 2026-10-25: global 3.41.6 → 3.47.8.
 - **macOS**: report pending updates and Rapid Security Responses; the user installs them
   (they restart the Mac).
 

@@ -201,6 +201,11 @@ bump usually means `Podfile.lock` still pins the old pod (jajotopa: Firebase 12.
 plugin's 12.19.3): `cd ios && pod update <Pod> --no-repo-update`, never a raised target, and
 commit `Podfile.lock`. `--no-repo-update` also gets past the CDN's "Error in the HTTP2 framing
 layer" (trunk redirects to `cdn.jsdelivr.net/cocoa/Specs/…`; `curl -L` fetches a missing spec).
+A Flutter upgrade to 3.47 moves an iOS project to Swift Package Manager on its first build
+(`Podfile.lock` shrinks to `Flutter`, `project.pbxproj` and `swiftpm/Package.resolved` change),
+which drops every `post_install` setting in the Podfile (jajotopa's geolocator flag). Where the
+Podfile sets anything, keep CocoaPods: `flutter: config: enable-swift-package-manager: false` in
+`pubspec.yaml`, then `git checkout` the migrated files.
 
 An update that migrates a database when it starts (pg-boss minors move its schema; a package's
 own migrations) is checked against a scratch database (`createdb <name>_ss_<date>`, migrate,
