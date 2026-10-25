@@ -60,13 +60,15 @@ projects:
     gh_account: ajara08
     branch: main
     push_policy: direct
-    push_notes: Push to main = Vercel production. Only ajara08 can see the repo. The holapy-nav stack on the VPS (ops/holapy-nav/) is applied by hand with dokploy-sync.sh, and that needs the user's OK.
-    release_age: missing
-    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml]}
-    key_deps: {"@tanstack/react-start": 1.168.60, vite: 8.3.3, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
-    node: {engines: null, other: "Vercel project setting (not visible locally)"}
-    deploy: {target: vercel, url: "https://holapy.com", health: null, also: "holapy-nav on dokploy, https://rutas.holapy.com/healthz", trigger: push to main}
-    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: null, build: pnpm build, dev: pnpm dev}
+    push_notes: Push to main = Vercel production. Only ajara08 can see the repo. The holapy-nav stack on the VPS (ops/holapy-nav/) is applied by hand with dokploy-sync.sh, and that needs the user's OK. Never write to holapy_prod; check it read-only (memory holapy-readonly-prod-router-check).
+    branches:
+      - {name: whatsapp, policy: "not for production: same updates (SKILL.md step 1), push, never merge; a push builds a Vercel preview only (every env var is Production-scoped)", test: "pnpm test (vitest, local DB only; WhatsApp client in fake mode)", bring_back: "docs/research/whatsapp-go-live.md on the branch"}
+    release_age: set
+    stack: {pm: pnpm@11.28.8, lockfiles: [pnpm-lock.yaml]}
+    key_deps: {"@tanstack/react-start": 1.169.4, vite: 8.3.5, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, postgres: 3.4.9, typescript: 6.0.3}
+    node: {engines: null, vercel: "24.x project setting, runtime nodejs24.x"}
+    deploy: {target: vercel, url: "https://holapy.com", health: "https://holapy.com/api/version", vercel_cli: "vercel -Q ~/.config/vercel-holapy --scope aj-30e1 (account ajara08)", also: "holapy-nav on dokploy, https://rutas.holapy.com/healthz", trigger: push to main}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: "null on main (whatsapp branch: pnpm test)", build: pnpm build, dev: pnpm dev}
 
   - name: platypost
     path: ~/Desktop/Nyto/platypost
@@ -297,7 +299,7 @@ mac:
     cloudflared: 2023.1.0 (brew)   # three years old
     op: 2.30.3 (brew cask)
     vercel: 62.2.0 (pnpm global)
-    osv_scanner: not installed
+    osv_scanner: 2.7.0 (brew)
   other: {go: 1.26.0, flutter: "fvm (3.41.0, 3.44.8, 3.47.7, stable)", python: 3.9.4 (python.org framework), postgres_app: [18]}
 
 # Adding a project: copy an entry above, fill every key from the repo (lockfiles, packageManager,
