@@ -33,12 +33,12 @@ projects:
     branch: main
     push_policy: direct
     push_notes: "Every push to main builds GHCR images and deploys web (and the collector when it changed) to Dokploy. Vercel is the rollback, deployed by hand: its Git connection was cut on 2026-10-18, but it still serves pasapy.com to anyone who asks Vercel's IP (custom domains are outside deployment protection) with production env vars, so every security patch is deployed there too. How: docs/DEPLOY_VPS.md, 'Deploying the rollback by hand' (git archive of HEAD, never the checkout, then vercel deploy --prod; check with curl --resolve pasapy.com:443:76.76.21.21 https://pasapy.com/api/health)."
-    release_age: missing
-    stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, apps/mobile/pubspec.lock], workspaces: [apps/*, packages/*], flutter: 3.47.8 (.fvmrc), overrides: "'@esbuild-kit/esm-loader': '-' (drizzle-kit 0.31 declares it and never loads it; it carried esbuild 0.18, GHSA-67mh-4wv8-2f99). Remove when drizzle-kit stops declaring it."}
+    release_age: set
+    stack: {pm: "pnpm@11.28.8 (packageManager, and `npm install -g pnpm@<v>` in apps/web and apps/collector Dockerfiles)", lockfiles: [pnpm-lock.yaml, apps/mobile/pubspec.lock], workspaces: [apps/*, packages/*], flutter: 3.47.8 (.fvmrc), overrides: "'@esbuild-kit/esm-loader': '-' (drizzle-kit 0.31 declares it and never loads it; it carried esbuild 0.18, GHSA-67mh-4wv8-2f99). Remove when drizzle-kit stops declaring it."}
     key_deps: {next: 16.4.3, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, postgres: 3.4.9 (patched, patches/postgres@3.4.9.patch), "@hookform/resolvers": 6.0.0}
     node: {engines: ">=22", docker: "node:24-slim (apps/web, apps/collector)", ci: "24 (ci.yml)"}
     deploy: {target: dokploy, services: [pasapy-web-xgcjvr, pasapy-collector-0eig1j], url: "https://pasapy.com", health: "https://pasapy.com/api/health", trigger: push to main}
-    deploy_rollback: {target: vercel-manual, project: pasapy, scope: nytojaras-projects, vercel_cli: "vercel -Q ~/.config/vercel-fastermenu", pnpm: "11.22.0 from packageManager (past the 11.11.0 install-time fixes)", check: "curl --resolve pasapy.com:443:76.76.21.21 https://pasapy.com/api/health"}
+    deploy_rollback: {target: vercel-manual, project: pasapy, scope: nytojaras-projects, vercel_cli: "vercel -Q ~/.config/vercel-fastermenu", pnpm: "from packageManager (11.28.8)", check: "curl --resolve pasapy.com:443:76.76.21.21 https://pasapy.com/api/health"}
     checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev, extra: pnpm knip}
 
   - name: jajotopa
