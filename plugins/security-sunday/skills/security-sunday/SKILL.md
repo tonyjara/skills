@@ -111,8 +111,22 @@ update: stop, tell the user, and do not run install or any script in that repo.
 - **Transitive CVE with no fixed parent:** an override (`overrides` in `pnpm-workspace.yaml` or
   `pnpm.overrides`; npm `overrides`) to the fixed version, with a comment naming the CVE. Remove
   overrides that are no longer needed.
-- **Fresh releases:** do not take a version published less than 48 hours ago unless it is the
-  CVE fix (compromised releases are usually pulled within a day). pnpm: `minimumReleaseAge`.
+- **Two-day release age, permanent.** Every project refuses versions published less than 48
+  hours ago (compromised releases are usually pulled within a day). Add it if it is missing,
+  set it explicitly even where the manager has a default (pnpm 11 defaults to one day), and
+  commit it with the updates:
+
+  | Manager | File | Setting | Exempting one fresh CVE fix |
+  |---|---|---|---|
+  | pnpm ≥10.16 | `pnpm-workspace.yaml` (create it in a single-package repo) | `minimumReleaseAge: 2880` (minutes) | `minimumReleaseAgeExclude: ['next@16.4.3']` |
+  | npm ≥11.10 | `.npmrc` | `min-release-age=2` (days) | `min-release-age-exclude=next` |
+  | bun ≥1.3 | `bunfig.toml` | `[install]` `minimumReleaseAge = 172800` (seconds) | `minimumReleaseAgeExcludes = ["next"]` |
+  | yarn ≥4.10 | `.yarnrc.yml` | `npmMinimalAgeGate: 2880` (minutes) | `npmPreapprovedPackages: ["next"]` |
+
+  Exempt only a CVE fix newer than 48 hours, pinned to that version where the manager allows it,
+  with a comment naming the CVE; remove the exemption the next Sunday. Never lower the age. A
+  manager or pinned version without the setting (Flutter, Go, Python, an older pnpm): say so in
+  the report and apply the rule by hand: skip versions newer than 48 hours.
 - **Install scripts:** pnpm 10+ blocks dependency build scripts; do not add a package to
   `onlyBuiltDependencies` / `allowBuilds` without saying why in the report.
 - `packageManager`: newest patch/minor of the same major. Flutter: `flutter pub upgrade`
@@ -164,6 +178,7 @@ in the same commit as the updates when you can:
 ## YYYY-MM-DD — security sunday
 - Audit before: 0 critical, 2 high, 5 moderate. After: 0 / 0 / 1 (why it is left).
 - Updated: next 16.3.4 → 16.3.7 (CVE-…), 41 others patch/minor.
+- Release age: 2880 min (added today / already set). Exemptions: none.
 - Node: 24.18.0 → 24.22.x in .nvmrc, Dockerfile, ci.yml.
 - Majors left: tailwindcss 4 → 5 (config rewrite).
 - Deploy: <url> healthy at HH:MM (commit abc1234). / PR #12.

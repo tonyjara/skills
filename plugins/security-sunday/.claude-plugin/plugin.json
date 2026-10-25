@@ -1,6 +1,6 @@
 {
   "name": "security-sunday",
   "description": "Weekly patch run: a dated CVE brief, then one agent per project (audit, patch and minor updates, Node runtime bumps, checks, one commit, deploy check, log), plus procedures for the VPS and the Mac, an inventory of every project and host, and one report per Sunday.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": { "name": "tonyjara" }
 }

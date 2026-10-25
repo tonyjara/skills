@@ -11,6 +11,16 @@
 # pushes to https:// remotes. git@ remotes push with the Mac's SSH key, which is tonyjara.
 #
 # key_deps are what was installed when last checked; the project's lockfile is the truth.
+#
+# release_age: every project refuses package versions younger than two days, permanently
+# (SKILL.md, step 4). Per project: set = in the repo, missing = add it this Sunday,
+# n/a = no package manager with dependencies.
+release_age:
+  minutes: 2880
+  pnpm: "pnpm-workspace.yaml: minimumReleaseAge: 2880"
+  npm: ".npmrc: min-release-age=2"
+  bun: "bunfig.toml: [install] minimumReleaseAge = 172800"
+  yarn: ".yarnrc.yml: npmMinimalAgeGate: 2880"
 
 updated: 2026-10-25
 
@@ -23,6 +33,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Every push to main builds GHCR images and deploys web (and the collector when it changed) to Dokploy. Vercel also builds every push and is the rollback.
+    release_age: missing
     stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, apps/mobile/pubspec.lock], workspaces: [apps/*, packages/*], flutter: 3.47.7 (.fvmrc)}
     key_deps: {next: 16.3.6, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.6, "@trpc/server": 11.19.0, postgres: 3.4.9 (patched, patches/postgres@3.4.9.patch)}
     node: {engines: ">=22", docker: "node:24-slim (apps/web, apps/collector)", ci: "24 (ci.yml)"}
@@ -36,6 +47,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Every push to main deploys web + worker to Dokploy. Migrations are not part of the deploy (pnpm db:migrate:prod first). Say whether the iOS app needs a new build (AGENTS.md).
+    release_age: missing
     stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml, mobile/pubspec.lock], flutter: "sdk ^3.11.4, no fvm pin"}
     key_deps: {next: 16.3.4, react: 19.2.8, drizzle-orm: 0.45.2, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
     node: {docker: "node:24-bookworm-slim", ci: "none (Docker build)"}
@@ -49,6 +61,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Push to main = Vercel production. Only ajara08 can see the repo. The holapy-nav stack on the VPS (ops/holapy-nav/) is applied by hand with dokploy-sync.sh, and that needs the user's OK.
+    release_age: missing
     stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml]}
     key_deps: {"@tanstack/react-start": 1.168.60, vite: 8.3.3, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9}
     node: {engines: null, other: "Vercel project setting (not visible locally)"}
@@ -62,6 +75,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Must always stay up. Push is safe (Dokploy auto-deploy is off); deploying the server is a manual Dokploy deploy with downtime (stop-first), so ask first and pick a moment with nothing queued to post. Never start a second dev server or point dev at production.
+    release_age: missing
     stack: {pm: pnpm@10.28.0, lockfiles: [pnpm-lock.yaml], workspaces: [packages/*, apps/*]}
     key_deps: {electron: 44.5.1, react: 19.3.0, vite: 7.3.6, "@tanstack/react-start": 1.168.60, drizzle-orm: 0.45.3, "@trpc/server": 11.19.0, postgres: 3.4.9}
     node: {engines: ">=22", docker: "node:22-bookworm-slim (apps/server)"}
@@ -75,6 +89,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Push to main deploys each changed app on Vercel (turbo-ignore). The second remote `nytojara` is stale; push origin only.
+    release_age: set
     stack: {pm: pnpm@11.22.0, lockfiles: [pnpm-lock.yaml], workspaces: [apps/*, packages/*]}
     key_deps: {next: 16.3.6, react: 19.2.8, drizzle-orm: 0.45.3, better-auth: 1.7.6, "@trpc/server": 11.19.0, postgres: 3.4.9}
     node: {}
@@ -88,6 +103,7 @@ projects:
     branch: main
     push_policy: pr-only
     push_notes: PR-only (the user's rule). PRs run claude-code-review and security-review; BUGBOT.md has the review rules. Merge = Vercel production. Skip .claude/worktrees/*.
+    release_age: missing
     stack: {pm: pnpm@10.33.2, lockfiles: [pnpm-lock.yaml, docs/pnpm-lock.yaml], stray: "bun.lock (tracked, stale since 2026-05-03; report it)"}
     key_deps: {next: 16.2.6, react: 19.2.6, drizzle-orm: 0.45.3, better-auth: 1.7.12, "@trpc/server": 11.17.0, postgres: 3.4.9}
     node: {ci: "24 (build.yml)", docs_engines: ">=20.0"}
@@ -101,6 +117,7 @@ projects:
     branch: main
     push_policy: pr-only
     push_notes: Changes land as PRs in practice. Merge = Vercel production.
+    release_age: set
     stack: {pm: "pnpm (no packageManager pin)", lockfiles: [pnpm-lock.yaml]}
     key_deps: {next: 16.3.0, react: 19.2.8, drizzle-orm: 0.45.2, better-auth: 1.7.7, "@trpc/server": 11.18.0, postgres: 3.4.9, remotion: 4.0.470}
     node: {}
@@ -114,6 +131,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: Conventional Commits (.cursorrules). Push to main = Vercel production.
+    release_age: missing
     stack: {pm: "ambiguous: pnpm-lock.yaml (newer) and package-lock.json both tracked; no pin", lockfiles: [pnpm-lock.yaml, package-lock.json]}
     key_deps: {next: 16.2.12, react: 19.2.8}
     node: {}
@@ -127,6 +145,7 @@ projects:
     branch: main
     push_policy: pr-only
     push_notes: 'CONTRIBUTING.md says never push to or merge into main. No production yet.'
+    release_age: missing
     stack: {pm: pnpm@11.28.6, lockfiles: [pnpm-lock.yaml], workspaces: [apps/web, apps/worker, apps/crawler, packages/*], flutter: "apps/mobile, sdk ^3.8.0, no lock"}
     key_deps: {next: 15.5.27, react: 19.3.0, drizzle-orm: 0.45.4, better-auth: 1.7.7, "@trpc/server": 11.19.0, pg: 8.23.1}
     node: {nvmrc: "22", engines: ">=22.12", docker: "ARG NODE_VERSION=22-bookworm-slim", ci: ".nvmrc"}
@@ -140,6 +159,7 @@ projects:
     branch: main
     push_policy: ask
     push_notes: "CLAUDE.md: do not run git commands automatically. Leave the changes uncommitted and list them, unless the user says to commit. Leave the agents' worktrees alone. Releases are v* tags (the /release skill)."
+    release_age: "missing (bunfig.toml, root and site/)"
     stack: {pm: "bun (not pinned; CI uses latest)", lockfiles: [bun.lock, site/bun.lock], workspaces: [server, web, desktop]}
     key_deps: {electron: 44.3.0, react: "19.3.0 / 19.3.1 (site)", vite: "8.3.0 / 8.3.4 (site)", "@tanstack/react-start": "1.169.3 (site)", pg: 8.23.1}
     node: {ci: "24 + bun latest"}
@@ -153,6 +173,7 @@ projects:
     branch: master
     push_policy: ask
     push_notes: master has one unpushed commit of the user's ("mmmm", 2026-09-15); a push would publish it too.
+    release_age: "missing (bunfig.toml)"
     stack: {pm: "bun (engines >=1.2.0)", lockfiles: [bun.lock]}
     key_deps: {}
     deploy: {target: none}
@@ -165,6 +186,7 @@ projects:
     branch: main
     push_policy: pr-only
     push_notes: No dependencies; only the CI Node version (22) to keep current. index.json is regenerated by CI, never by hand.
+    release_age: n/a
     stack: {pm: none}
     node: {ci: "22 (ci.yml)"}
     deploy: {target: github, trigger: merge to main}
@@ -177,6 +199,7 @@ projects:
     branch: master
     push_policy: direct
     push_notes: Swift, no external dependencies. Only the toolchain to note. Releases are manual (notarized app + Homebrew cask).
+    release_age: n/a
     stack: {pm: swiftpm}
     deploy: {target: github-releases, trigger: manual}
     checks: {build: swift build}
@@ -188,6 +211,7 @@ projects:
     branch: main
     push_policy: direct
     push_notes: No dependencies (ioc-check.mjs uses only Node built-ins).
+    release_age: n/a
     stack: {pm: none}
     deploy: {target: github, trigger: push to main (plugins update from the marketplace)}
 
@@ -196,6 +220,7 @@ projects:
     repo: null
     push_policy: ask
     push_notes: Not a git repo, local tool. Update in place; nothing to push.
+    release_age: "missing (only minimumReleaseAgeExclude; relies on the pnpm 11 one-day default)"
     stack: {pm: "pnpm (no pin)", lockfiles: [pnpm-lock.yaml]}
     key_deps: {react: 19.3.0, vite: 8.3.3, hono: "^4.13.13"}
     deploy: {target: none}

@@ -10,6 +10,7 @@
 **Deploy:** <url> healthy at HH:MM / failed: … / no deploy (why)
 
 Audit: before C/H/M <n/n/n> → after <n/n/n>. IOC check: clean / HIT (stop).
+Release age: 2 days, added today / already set / not supported (<manager>). Exemptions: none / <pkg@v> (CVE-…).
 
 Fixed:
 - <pkg> a → b (CVE-…, severity)
