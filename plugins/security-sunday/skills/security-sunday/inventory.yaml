@@ -105,7 +105,7 @@ projects:
     gh_account: subignite
     branch: main
     push_policy: pr-only
-    push_notes: PR-only (the user's rule). PRs run claude-code-review and security-review; BUGBOT.md has the review rules. Merge = Vercel production. Skip .claude/worktrees/*.
+    push_notes: PR-only (the user's rule). PRs run only the `build` check; the review bot was removed in subignite PR 132, so don't wait for one or add it back. Merge = Vercel production. Skip .claude/worktrees/*.
     release_age: missing
     stack: {pm: pnpm@10.33.2, lockfiles: [pnpm-lock.yaml, docs/pnpm-lock.yaml], stray: "bun.lock (tracked, stale since 2026-05-03; report it)"}
     key_deps: {next: 16.2.6, react: 19.2.6, drizzle-orm: 0.45.3, better-auth: 1.7.12, "@trpc/server": 11.17.0, postgres: 3.4.9}
