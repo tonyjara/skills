@@ -46,6 +46,7 @@ Save it as `briefs/<YYYY-MM-DD>-report.md` and post the short version to the use
 |---|---|---|---|---|
 | Mac | | | | |
 | nytojara-vps | | | | |
+| Crawlers (Cloudflare, Vercel) | verified Googlebot/Bingbot requests blocked since last Sunday: n | | | |
 | <project> | | | | |
 
 ## Fixed

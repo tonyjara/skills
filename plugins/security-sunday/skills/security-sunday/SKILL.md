@@ -19,6 +19,7 @@ only the checkout.
 | `briefs/<date>.md` | That Sunday's advisories and what they mean for us. Read the newest one first |
 | `hosts.md` | The VPS and any future server: inventory, OS and Docker updates, what needs the user's OK |
 | `mac.md` | Homebrew, global npm tools, Node, the CLIs |
+| `crawlers.md` | Googlebot and Bingbot reach every site: Cloudflare settings and logs, Vercel firewalls, and the fix |
 | `report-template.md` | The per-project report and the Sunday summary |
 | `briefs/<date>-iocs.txt` | That Sunday's known-bad npm packages, one `name@version` (or bare `name`) per line |
 | `scripts/ioc-check.mjs` | Finds IOC entries in every lockfile of a repo (pnpm, npm, bun, yarn), installs nothing |
@@ -27,8 +28,8 @@ only the checkout.
 
 ## Who does what
 
-- **The coordinator** (the first card of the Sunday) writes the brief (below), runs `mac.md`
-  and `hosts.md`, starts one agent per project in `inventory.yaml`, then merges their reports
+- **The coordinator** (the first card of the Sunday) writes the brief (below), runs `mac.md`,
+  `hosts.md` and `crawlers.md`, starts one agent per project in `inventory.yaml`, then merges their reports
   into the Sunday summary, applies their inventory changes and commits this repo.
 - **A project agent** runs "Updating one project" for exactly one project and reports back.
   It does not edit this skill or the inventory: it puts those changes in its report.
@@ -247,6 +248,11 @@ A project that moved off Vercel may still have its old Vercel project serving th
 to anyone who asks Vercel's IP, with an unpatched build: `curl --resolve
 <domain>:443:76.76.21.21 https://<domain>/<health>`. If it answers, patch it too
 or ask the user to delete that project (pasapy's was, on 2026-10-25).
+
+A domain that moved (a cutover, a host newly proxied by Cloudflare, a new firewall or bot
+setting) is checked with `crawlers.md` right after the move. The proof is Cloudflare's log of
+the real Googlebot getting 200 on a page. A Googlebot user agent sent from the Mac proves
+nothing: that is how Pasapy's search traffic was blocked for nine days in October 2026.
 
 A failed deploy: report it with the log lines. Rollbacks on the VPS follow `hosts.md`.
 
