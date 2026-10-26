@@ -107,11 +107,11 @@ projects:
     push_policy: pr-only
     push_notes: PR-only (the user's rule). PRs run only the `build` check; the review bot was removed in subignite PR 132, so don't wait for one or add it back. Merge = Vercel production. Skip .claude/worktrees/*.
     release_age: missing
-    stack: {pm: pnpm@10.33.2, lockfiles: [pnpm-lock.yaml, docs/pnpm-lock.yaml]}
-    key_deps: {next: 16.2.6, react: 19.2.6, drizzle-orm: 0.45.3, better-auth: 1.7.12, "@trpc/server": 11.17.0, postgres: 3.4.9}
-    node: {ci: "24 (build.yml)", docs_engines: ">=20.0"}
+    stack: {pm: pnpm@10.34.8, lockfiles: [pnpm-lock.yaml, docs/pnpm-lock.yaml]}
+    key_deps: {next: 16.4.3, react: 19.3.1, drizzle-orm: 0.45.4, better-auth: 1.7.12, "@trpc/server": 11.19.0, postgres: 3.4.9}
+    node: {engines: 24.x, nvmrc: "24", ci: "24 (build.yml)", vercel: "24.x (engines.node wins over the project setting)", docs_engines: ">=20.0"}
     deploy: {target: vercel, url: "https://subignite.com", health: "https://subignite.com/api/health", trigger: merge to main}
-    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev}
+    checks: {typecheck: pnpm typecheck, lint: pnpm lint, test: pnpm test, build: pnpm build, dev: pnpm dev, extra: "pnpm check:procedures"}
 
   - name: fastermenu
     path: ~/Desktop/Bytetify/fastermenu
