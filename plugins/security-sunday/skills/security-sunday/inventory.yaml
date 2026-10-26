@@ -133,12 +133,12 @@ projects:
     gh_account: tonyjara
     branch: main
     push_policy: direct
-    push_notes: Conventional Commits (.cursorrules). Push to main = Vercel production.
+    push_notes: "Conventional Commits (.cursorrules). A push deploys nothing: Vercel refuses git deploys from a private GitHub org on Hobby, and a CLI deploy with git metadata is Blocked (commit author not on the team). Deploy a git-less copy: `git archive HEAD | tar -x -C <tmp>`, copy .vercel/project.json in, `vercel deploy --prod --yes --scope bytetify --cwd <tmp>` (CLI login bytetify-2)."
     release_age: missing
     stack: {pm: "ambiguous: pnpm-lock.yaml (newer) and package-lock.json both tracked; no pin", lockfiles: [pnpm-lock.yaml, package-lock.json]}
     key_deps: {next: 16.2.12, react: 19.2.8}
     node: {}
-    deploy: {target: vercel, url: "https://bytetify.com", health: null, trigger: push to main}
+    deploy: {target: vercel, url: "https://bytetify.com", health: null, trigger: "manual CLI deploy of a git-less copy (push_notes)"}
     checks: {typecheck: "pnpm exec tsc --noEmit (no script)", lint: "broken (next lint is gone in Next 16)", test: null, build: pnpm build, dev: pnpm dev}
 
   - name: rogapy
