@@ -1,6 +1,6 @@
 ---
 name: agent-sessions
-description: Give AI agents a safe way to check an app's admin panel in production when sign-in is a magic link, OAuth or anything else an agent cannot finish on its own. A separate agent user; a command inside the app's container that writes an hour's session straight into the auth tables, records it in an audit table and prints the cookie on stdout only; a read-only rule enforced in one place; revocation that deletes nothing; and a helper on the developer's machine that mints over ssh + docker exec and loads the cookie into a headless browser or curl without printing it. Covers Better Auth (in detail), Supabase Auth and Auth.js / NextAuth. Use this whenever someone says agents cannot log in to the admin, wants an agent to "check the admin in prod", look at a signed-in page, verify a deploy behind a login, an "agent login", "agent session", "service account for the panel", "impersonate admin for testing", or asks how a coding agent can see what the owner sees, even if they only ask to "mint a session" or "get a cookie for the admin".
+description: Give AI agents a safe way to check an app's admin panel in production when sign-in is a magic link, OAuth or anything else an agent cannot finish on its own. A separate agent user; a command inside the app's container that writes an hour's session straight into the auth tables, records it in an audit table and prints the cookie on stdout only; a read-only rule enforced in one place; revocation that deletes nothing; and a helper on the developer's machine that mints over ssh + docker exec and loads the cookie into a headless browser or curl without printing it. Covers Better Auth (in detail), Supabase Auth and Auth.js / NextAuth, and apps on Vercel or any host with no shell, where the database mints and the app signs a one-time key. Use this whenever someone says agents cannot log in to the admin, wants an agent to "check the admin in prod", look at a signed-in page, verify a deploy behind a login, an "agent login", "agent session", "service account for the panel", "impersonate admin for testing", or asks how a coding agent can see what the owner sees, even if they only ask to "mint a session" or "get a cookie for the admin".
 ---
 
 # Agent sessions: an hour in the admin for an agent
@@ -26,6 +26,8 @@ look. This recipe closes that gap without weakening sign-in for anyone:
 
 Read this file, then the reference for the app's auth library and the two templates, which come from
 a working Next.js 16 + Better Auth + Drizzle app with Postgres on a VPS (Docker Swarm via Dokploy).
+When the app runs on Vercel (or anywhere you cannot `docker exec`), read `references/no-container.md`
+too: the mint moves into the database and the app signs a one-time key (proven on Subignite).
 
 ## The decisions, and why
 
@@ -142,6 +144,59 @@ a working Next.js 16 + Better Auth + Drizzle app with Postgres on a VPS (Docker 
 7. **Docs.** One page in the repo (`docs/agent-sessions.md`) with the commands, the rules and the
    proof, and a few lines in the project's CLAUDE.md / AGENTS.md telling agents to use the helper
    and never the database by hand.
+
+## When access comes from roles, not an admin allowlist
+
+Most apps decide access per space, team or project (`space_roles`, memberships, plans), not by
+one admin list. Then (Subignite):
+
+- **The agent is an ordinary user with the smallest roles its checks need**, granted by hand once and
+  recorded in the docs: an `admin` (not `owner`) role on one throwaway space keeps owner-only
+  actions out of reach, such as payments, payouts, refunds and API connections. The mint refuses
+  while the agent holds the app's top role (a platform admin).
+- **The grant check goes in the one function every request reads the session through**
+  (`readSession`), not in an admin check. Key it by the agent's address
+  (`isAgentEmail(user.email)` before any query), so it costs nothing for everyone else. No live
+  grant means signed out; a read-only grant's writes are treated as signed out (401). Find every
+  caller of the library's `getSession` first; a second reader is a hole.
+- **Close the side doors.** Anything that authenticates without the session reader would outlive
+  the grant: MCP or OAuth access tokens, personal API tokens, signed links. Refuse the agent where
+  those resolve a user. Also refuse a sign-in link for its address (the eligibility check) and
+  every email to it (in the one sender), and skip it in analytics, both client-side
+  (`posthog.opt_out_capturing()`) and by blocking the analytics host in the helper's browser.
+  Server-side events still record it.
+- **Read who pays before giving the agent a plan.** Subignite's AI jobs charge the space owner
+  (`assertCanSpend(db, space.ownerId, …)`), so the agent needs no plan of its own. On the
+  throwaway space, the space's owner pays.
+
+## Running checks with it
+
+What the first full run (Subignite, 13 signed-in checks of a site builder) taught:
+
+- **Read what a button does on the server before a script clicks it.** A first Publish there
+  submitted the space for review and emailed the platform admins. It would also have created live
+  Stripe products for every offer, free ones included. Its dialog only appeared because the
+  server asked for confirmation. Saves that reload the page instead of showing a toast make a
+  script lose track. On a space never published, "Discard draft" is disabled and "Revert to this"
+  does the job.
+- **Production probes must change nothing even if the rule failed:** write back the agent's own
+  settings unchanged, an empty JSON upload, a query. Some routes validate the body before they
+  check the session (400 before 401), so a refusal probe there needs a valid body.
+- **Throwaway work goes on one space, and the cleanup goes through the app's own delete actions**,
+  so storage files go too. Revert the draft, delete the posts and media the run made, then compare
+  the draft with the starting revision in the database. Temporary roles or memberships on other
+  spaces (a published demo, for a check that needs one) come off right after, by SQL, and are
+  recorded.
+- **`waitUntil: 'networkidle'` never comes on apps with open connections** (presence, streams).
+  Wait for `load`, then a capped `networkidle`.
+- **Prove it locally on `next build` and `next start`.** In `next dev` a page can reload itself in a
+  loop under a headless browser (Turbopack's Fast Refresh).
+- **The run finds real bugs that a person's own browser hides.** In Chrome 156, `scrollIntoView()`
+  returns a Promise. An effect written as an expression (`useEffect(() => ref.current?.scrollIntoView())`)
+  then hands React a Promise as its cleanup, and the builder's assistant crashed on every message
+  for every user. Add a lint rule refusing effects with an expression body. A headless browser in
+  another time zone than the server also shows hydration errors (React #418) from
+  `toLocaleDateString(undefined, …)` in client components.
 
 ## Prove it before calling it done
 

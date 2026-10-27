@@ -1,6 +1,6 @@
 {
   "name": "agent-sessions",
-  "description": "Let AI agents check an app's admin panel in production: a separate agent user, an hour's session minted straight into the database by a command inside the app's container, a read-only rule, an audit table, revocation, and an ssh helper that loads the cookie into Playwright or curl without ever printing it. Better Auth, Supabase and Auth.js.",
-  "version": "0.1.0",
+  "description": "Let AI agents check an app's admin panel or signed-in pages in production: a separate agent user, an hour's session minted straight into the database (by a command in the app's container, or, for apps on Vercel, by a SQL function in the database's container plus a one-time key the app signs), a read-only rule, an audit table, revocation, and an ssh helper that loads the cookie into Playwright or curl without ever printing it. Better Auth, Supabase and Auth.js.",
+  "version": "0.2.0",
   "author": { "name": "tonyjara" }
 }

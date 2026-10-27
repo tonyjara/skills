@@ -34,7 +34,7 @@ ln -s "$PWD/skills/plugins/auth-like-tony/skills/auth-like-tony" ~/.claude/skill
 | `image-cropper` | Image upload field: compress in the browser, crop at a fixed aspect with zoom-out-to-fit, re-editable crops, min-width gate, wide + square preview. |
 | `mobile-web` | Phone-ready web UI: locked viewport scale, no iOS zoom on fields, safe areas, bottom-sheet dialogs, scrolling tab rows, tables as cards, and a screenshot + overflow audit at phone width. |
 | `security-sunday` | Weekly patch run: a dated CVE brief, then per project audit, patch/minor updates, Node bumps, checks, one commit, deploy check and a security log; the VPS and Mac procedures, an inventory of every project and host, and a Sunday report. |
-| `agent-sessions` | Agents check an app's admin in production: a separate agent user, an hour's session minted in the database from inside the container, read-only unless asked, an audit table, revoke, and an ssh helper that hands the cookie to Playwright or curl without printing it. Better Auth, Supabase, Auth.js. |
+| `agent-sessions` | Agents check an app's admin or signed-in pages in production: a separate agent user, an hour's session minted in the database from inside the container (or, for apps on Vercel, by a SQL function in the database's container and a one-time key the app signs), read-only unless asked, an audit table, revoke, and an ssh helper that hands the cookie to Playwright or curl without printing it. Better Auth, Supabase, Auth.js. |
 
 ## Skill or plugin?
 
