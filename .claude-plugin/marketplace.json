@@ -31,6 +31,11 @@
       "name": "security-sunday",
       "source": "./plugins/security-sunday",
       "description": "Weekly patch run: a dated CVE brief, then per project audit, patch/minor updates, Node runtime bumps, checks, one commit, deploy check and a log; plus the VPS and Mac procedures, an inventory of projects and hosts, and one report per Sunday."
+    },
+    {
+      "name": "agent-sessions",
+      "source": "./plugins/agent-sessions",
+      "description": "Let AI agents check an app's admin in production: a separate agent user, an hour's session minted in the database by a command inside the container, read-only by default, audited and revocable, and an ssh helper that loads the cookie into Playwright or curl without printing it. Better Auth, Supabase, Auth.js."
     }
   ]
 }
