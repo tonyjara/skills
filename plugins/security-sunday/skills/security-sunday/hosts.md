@@ -111,6 +111,24 @@ way in and test it:
    inventory answers 200, the host's monitor is quiet.
 5. Record it in the host's runbook, update the host's entry in the inventory.
 
+## Arch hosts (`steamdeck`)
+
+Everything above is written for Ubuntu and the VPS. The Deck's own page
+(`~/Desktop/Nyto/hostinger_nytojara/docs/steamdeck.md`) wins; read it first. What differs:
+
+- **Read-only, no sudo:** `omarchy-version; uname -r; uptime; checkupdates; tailscale version; ssh -V;
+  systemctl --failed --no-legend; efibootmgr | grep BootOrder`. Docker needs root, so read the services
+  from its Dokploy API, key in the Keychain (`dokploy-steamdeck-api`), and check the gate's `/healthz`.
+- **Nothing is automatic.** Arch has no security-only channel, so every update is a full upgrade, weekly.
+- **Applying needs the user.** No agent has sudo there: ask the user to open the temporary window the
+  page gives, and close it after. If they do not, report what is pending and move on.
+- **Never `omarchy-update -y` under that window:** it stalls on `sudo -v`. Run its steps; the page lists them.
+- **May reboot without asking** (nothing must stay up), but only with the checks on the page: the
+  boot order first, then back within a minute and no `TPM policy does not match` in the journal.
+- **Never `fwupdmgr update`, a BIOS update or a dbx update** without the user there: they change PCR 7,
+  the box then stops at a passphrase prompt on its screen until the TPM is sealed again.
+- Tailscale upgrades are safe here: its netfilter is off on purpose, so leave it off.
+
 ## Adding a host
 
 Add it under `hosts:` in `inventory.yaml`: name, ssh alias, how to reach it, ops folder, what
