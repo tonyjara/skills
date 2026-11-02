@@ -1,0 +1,147 @@
+#!/bin/bash
+# devclient: one simulator development build per native fingerprint, shared by
+# every copy (worktree, scratch clone) of an Expo project on this Mac.
+#
+#   devclient key                 the cache key: <name>-<fingerprint>-<configuration>
+#   devclient has                 exit 0 when the build for this fingerprint is cached
+#   devclient path                print the cached .app (extracted once), for
+#                                 npx expo run:ios --binary "$(devclient path)"
+#   devclient save <App.app>      store a simulator build you just made
+#   devclient install <udid>      install the cached build unless the simulator has it
+#   devclient list                what is cached
+#   devclient prune [--keep 3]    keep the newest N builds per project
+#
+# Options: --root <app dir> (default: nearest folder up with app.json or
+# app.config.*), --name <project> (default: package.json name), --configuration
+# Debug|Release (default Debug). Cache: $IOS_Q_BUILD_CACHE, default
+# ~/Library/Caches/ios-q/builds. The fingerprint is @expo/fingerprint's default,
+# the same hash `expo run:ios` hands a build-cache provider.
+
+set -u
+ME=${0##*/}
+CACHE=${IOS_Q_BUILD_CACHE:-$HOME/Library/Caches/ios-q/builds}
+say() { echo "$ME: $*" >&2; }
+die() { say "$*"; exit 2; }
+simctl() { if [ -n "${IOS_Q_SIMCTL:-}" ]; then "$IOS_Q_SIMCTL" "$@"; else xcrun simctl "$@"; fi; }
+
+ROOT=; NAME=; CONF=Debug; KEEP=3; ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --root) ROOT=${2:-}; shift 2 ;;
+    --name) NAME=${2:-}; shift 2 ;;
+    --configuration) CONF=${2:-}; shift 2 ;;
+    --keep) KEEP=${2:-}; shift 2 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+CMD=${ARGS[0]:-help}
+mkdir -p "$CACHE"
+
+find_root() {
+  local d; d=$(pwd -P)
+  while [ "$d" != / ]; do
+    for f in app.json app.config.js app.config.ts app.config.mjs app.config.cjs; do
+      [ -f "$d/$f" ] && { echo "$d"; return; }
+    done
+    d=$(dirname "$d")
+  done
+  return 1
+}
+
+app_root() {
+  [ -n "$ROOT" ] || ROOT=$(find_root) || die "no app.json or app.config.* here or above; pass --root"
+  ROOT=$(cd "$ROOT" && pwd -P)
+}
+
+project_name() {
+  [ -n "$NAME" ] && { echo "$NAME"; return; }
+  local n
+  n=$(node -e 'try { const p = require(process.argv[1]); process.stdout.write((p.name || "").replace(/^@[^/]+\//, "")) } catch (e) {}' "$ROOT/package.json" 2>/dev/null)
+  [ -n "$n" ] || n=$(basename "$ROOT")
+  printf '%s' "$n" | tr -c 'A-Za-z0-9._-' '_'
+}
+
+fingerprint() {
+  if [ -n "${DEVCLIENT_TEST_FINGERPRINT:-}" ]; then echo "$DEVCLIENT_TEST_FINGERPRINT"; return; fi
+  (cd "$ROOT" && npx --no-install @expo/fingerprint fingerprint:generate 2>/dev/null) \
+    | node -e 'let s = ""; process.stdin.on("data", d => s += d).on("end", () => { try { process.stdout.write(JSON.parse(s).hash) } catch (e) { process.exit(1) } })' \
+    || die "could not compute the fingerprint (is @expo/fingerprint installed in $ROOT?)"
+}
+
+key() { app_root; echo "$(project_name)-$(fingerprint)-$CONF"; }
+
+# What identifies the code inside a build: the executable and, in debug
+# builds, the .debug.dylib that holds the app's code.
+app_sha() {
+  local app=$1 exe
+  exe=$(plutil -extract CFBundleExecutable raw "$app/Info.plist" 2>/dev/null) || return 1
+  cat "$app/$exe" "$app/$exe.debug.dylib" 2>/dev/null | shasum -a 256 | cut -c1-16
+}
+
+extract() {   # key → prints the .app path
+  local k=$1 dir="$CACHE/$1" tmp app
+  [ -f "$CACHE/$k.tar.gz" ] || return 1
+  if [ ! -d "$dir" ]; then
+    tmp="$CACHE/.extract.$$"; rm -rf "$tmp"; mkdir -p "$tmp"
+    tar -xzf "$CACHE/$k.tar.gz" -C "$tmp" || { rm -rf "$tmp"; die "cannot extract $k"; }
+    mv "$tmp" "$dir" 2>/dev/null || rm -rf "$tmp"   # another process won the race: fine
+  fi
+  app=$(ls -d "$dir"/*.app 2>/dev/null | head -1)
+  [ -n "$app" ] && echo "$app"
+}
+
+case "$CMD" in
+  key) key ;;
+  has) k=$(key); [ -f "$CACHE/$k.tar.gz" ] && { echo "$k"; exit 0; }; say "not cached: $k"; exit 1 ;;
+  path) k=$(key); extract "$k" || { say "not cached: $k (build once, then: $ME save <App.app>)"; exit 1; } ;;
+  save)
+    app=${ARGS[1]:-}; [ -d "$app" ] && [ -f "$app/Info.plist" ] || die "save <path/to/App.app>"
+    app=$(cd "$app" && pwd -P)
+    plat=$(plutil -extract CFBundleSupportedPlatforms.0 raw "$app/Info.plist" 2>/dev/null)
+    [ "$plat" = iPhoneSimulator ] || die "$app is a $plat build; only simulator builds are cached (device builds are signed for one phone)"
+    k=$(key)
+    tmp="$CACHE/.save.$$.tar.gz"
+    tar -czf "$tmp" -C "$(dirname "$app")" "$(basename "$app")" || { rm -f "$tmp"; die "tar failed"; }
+    printf 'bundle_id=%s\nsha=%s\nsaved=%s\nfrom=%s\n' "$(plutil -extract CFBundleIdentifier raw "$app/Info.plist")" \
+      "$(app_sha "$app")" "$(date +%s)" "$ROOT" > "$CACHE/$k.meta"
+    mv -f "$tmp" "$CACHE/$k.tar.gz"
+    rm -rf "${CACHE:?}/$k"
+    say "cached $k ($(du -h "$CACHE/$k.tar.gz" | cut -f1))"
+    ;;
+  install)
+    udid=${ARGS[1]:-}; [ -n "$udid" ] || die "install <udid> (from ios-q sim)"
+    k=$(key)
+    app=$(extract "$k") || { say "not cached: $k. Build it under the build lane, then '$ME save'."; exit 1; }
+    bid=$(sed -n 's/^bundle_id=//p' "$CACHE/$k.meta")
+    want=$(sed -n 's/^sha=//p' "$CACHE/$k.meta")
+    have_app=$(simctl get_app_container "$udid" "$bid" app 2>/dev/null)
+    if [ -n "$have_app" ] && [ "$(app_sha "$have_app")" = "$want" ]; then
+      say "$udid already has $k"
+    else
+      simctl install "$udid" "$app" || die "install failed"
+      say "installed $k on $udid"
+    fi
+    echo "$bid"
+    ;;
+  list)
+    for f in "$CACHE"/*.tar.gz; do
+      [ -f "$f" ] || continue
+      k=$(basename "$f" .tar.gz)
+      printf '%-60s %6s  %s\n' "$k" "$(du -h "$f" | cut -f1)" "$(date -r "$f" '+%Y-%m-%d %H:%M')"
+    done
+    ;;
+  prune)
+    # keep the newest $KEEP per project name (the key minus fingerprint and configuration)
+    ls -t "$CACHE"/*.tar.gz 2>/dev/null | while read -r f; do
+      k=$(basename "$f" .tar.gz); n=${k%-*}; n=${n%-*}
+      echo "$n|$f"
+    done | awk -F'|' -v keep="$KEEP" '{ c[$1]++; if (c[$1] > keep) print $2 }' | while read -r f; do
+      k=$(basename "$f" .tar.gz)
+      rm -rf "$f" "$CACHE/$k.meta" "${CACHE:?}/$k"
+      say "pruned $k"
+    done
+    ;;
+  help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) die "unknown command $CMD (see $ME help)" ;;
+esac

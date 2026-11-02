@@ -1,0 +1,898 @@
+#!/bin/bash
+# ios-q: lanes for iOS builds, simulators and test runs when several coding
+# agents share one Mac. Run `ios-q help`, or read SKILL.md next to this script.
+#
+# State lives in $IOS_Q_STATE (default ~/.local/state/ios-q): one file per lease,
+# one per waiter. Settings come from the environment or from IOS_Q_* lines in
+# ~/.config/ios-q/config (the environment wins). macOS's own bash 3.2 is enough.
+
+set -u
+IOS_Q_VERSION=0.1.0
+ME=${0##*/}
+
+# ---------------------------------------------------------------- settings --
+
+load_config() {
+  local f="${IOS_Q_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/ios-q/config}" line k v
+  [ -f "$f" ] || return 0
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|\#*) continue ;; esac
+    k=${line%%=*}; v=${line#*=}
+    case "$k" in *[!A-Z0-9_]*|'') continue ;; IOS_Q_*) ;; *) continue ;; esac
+    v=${v#\"}; v=${v%\"}; v=${v#\'}; v=${v%\'}
+    case "$v" in \~/*) v="$HOME/${v#\~/}" ;; esac
+    printenv "$k" >/dev/null 2>&1 || export "$k=$v"
+  done < "$f"
+}
+load_config
+
+S=${IOS_Q_STATE:-$HOME/.local/state/ios-q}
+POLL=${IOS_Q_POLL:-3}                       # seconds between tries while waiting
+REPORT_EVERY=${IOS_Q_REPORT_EVERY:-60}      # seconds between "your place" lines
+MIN_FREE_MB=$(( ${IOS_Q_MIN_FREE_GB:-4} * 1024 ))
+BOOTED_MAX=${IOS_Q_BOOTED_MAX:-3}
+BOOTED_MAX_PRIORITY=${IOS_Q_BOOTED_MAX_PRIORITY:-4}
+METRO_BASE=${IOS_Q_METRO_BASE:-8081}
+JOBS=${IOS_Q_JOBS:-8}
+POLITE=${IOS_Q_POLITE:-1}
+LEGACY=${IOS_Q_LEGACY_LOCK:-}               # an old mkdir lock the build lane also holds
+LEGACY_STALE=${IOS_Q_LEGACY_STALE:-2700}    # the old script's own stale rule (45 min)
+SIM_MATCH=${IOS_Q_SIM_MATCH:-exact}         # exact: "<Project>" and "<Project> B"; prefix: "<Project> *"
+PRIORITY_FOR=${IOS_Q_PRIORITY_FOR:-60m}
+NCPU=${IOS_Q_TEST_NCPU:-$(sysctl -n hw.ncpu 2>/dev/null || echo 8)}
+
+LANES="build boot maestro heavy device"
+
+lane_width() {
+  case "$1" in
+    build) echo "${IOS_Q_WIDTH_BUILD:-1}" ;;
+    boot) echo "${IOS_Q_WIDTH_BOOT:-1}" ;;
+    maestro) echo "${IOS_Q_WIDTH_MAESTRO:-2}" ;;
+    heavy) echo "${IOS_Q_WIDTH_HEAVY:-1}" ;;
+    device) echo "${IOS_Q_WIDTH_DEVICE:-1}" ;;
+    *) echo 0 ;;
+  esac
+}
+# 1-minute load average allowed, as a multiple of the core count; empty = no gate
+lane_load_mult() {
+  case "$1" in
+    build) echo "${IOS_Q_LOAD_BUILD:-2}" ;;
+    boot) echo "${IOS_Q_LOAD_BOOT:-2}" ;;
+    heavy) echo "${IOS_Q_LOAD_HEAVY:-2}" ;;
+    maestro) echo "${IOS_Q_LOAD_MAESTRO:-4}" ;;
+    *) echo "" ;;
+  esac
+}
+lane_mem_gate() { case "$1" in build|boot|heavy|maestro) return 0 ;; *) return 1 ;; esac; }
+lane_default_max() {
+  case "$1" in
+    build) echo 60m ;; boot) echo 10m ;; maestro) echo 25m ;; heavy) echo 60m ;;
+    device) echo 30m ;; sim) echo 60m ;; *) echo 30m ;;
+  esac
+}
+is_lane() { case " $LANES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+mkdir -p "$S/leases" "$S/waiters" "$S/priority" 2>/dev/null || { echo "$ME: cannot create $S" >&2; exit 1; }
+
+# ----------------------------------------------------------------- helpers --
+
+say() { echo "$ME: $*" >&2; }
+die() { say "$*"; exit 2; }
+now() { date +%s; }
+clock() { date -r "$1" +%H:%M; }
+
+parse_dur() {
+  local v=$1 n u
+  n=${v%[smhd]}; u=${v#"$n"}
+  case "$n" in ''|*[!0-9]*) return 1 ;; esac
+  case "$u" in s) echo "$n" ;; ''|m) echo $((n * 60)) ;; h) echo $((n * 3600)) ;; d) echo $((n * 86400)) ;; *) return 1 ;; esac
+}
+fmt_dur() {
+  local s=$1
+  if [ "$s" -lt 60 ]; then echo "${s}s"
+  elif [ "$s" -lt 3600 ]; then echo "$((s / 60))m"
+  else printf '%dh%02dm\n' $((s / 3600)) $((s % 3600 / 60)); fi
+}
+ordinal() { case "$1" in 1) echo 1st ;; 2) echo 2nd ;; 3) echo 3rd ;; *) echo "${1}th" ;; esac; }
+clean() { printf '%s' "$1" | tr '\n\r\t' '   '; }
+safe_name() { printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_'; }
+lower() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
+
+pstart_of() { ps -o lstart= -p "$1" 2>/dev/null | tr -s ' '; }
+alive() {   # pid [start time]: the same process, not a reused pid
+  kill -0 "$1" 2>/dev/null || return 1
+  [ -z "${2:-}" ] && return 0
+  [ "$(pstart_of "$1")" = "$2" ]
+}
+
+# The process a `take` belongs to: the first ancestor that is not a shell or a
+# wrapper. For an agent's Bash tool that is the agent itself, so the lease lives
+# as long as the agent does and ends with it.
+holder_pid() {
+  if [ -n "${IOS_Q_HOLDER_PID:-}" ]; then echo "$IOS_Q_HOLDER_PID"; return; fi
+  local pid=$PPID line ppid comm
+  while [ "$pid" -gt 1 ]; do
+    line=$(ps -o ppid= -o comm= -p "$pid" 2>/dev/null) || break
+    [ -n "$line" ] || break
+    read -r ppid comm <<EOF
+$line
+EOF
+    comm=${comm##*/}; comm=${comm#-}
+    case "$comm" in
+      sh|bash|zsh|dash|ksh|fish|env|nohup|timeout|gtimeout|sudo|xargs|time|caffeinate|script|ios-q|ios-q.sh|ios-lock.sh|perl) pid=$ppid ;;
+      *) echo "$pid"; return ;;
+    esac
+  done
+  echo "$PPID"
+}
+
+copy_root() { git rev-parse --show-toplevel 2>/dev/null || pwd -P; }
+
+# Leases and waiters are small key=value files. kv_load sets R_<key>.
+KEYS="id lane who why pid pstart since until udid port project root legacy seq name"
+kv_load() {
+  local k line v
+  for k in $KEYS; do eval "R_$k="; done
+  [ -f "$1" ] || return 1
+  while IFS= read -r line; do
+    k=${line%%=*}; v=${line#*=}
+    case " $KEYS " in *" $k "*) eval "R_$k=\$v" ;; esac
+  done < "$1"
+  return 0
+}
+kv_write() {   # file key=value...
+  local f=$1 tmp; shift
+  tmp="$f.tmp.$$"
+  : > "$tmp" || return 1
+  for kv in "$@"; do printf '%s\n' "$(clean "$kv")" >> "$tmp"; done
+  mv -f "$tmp" "$f"
+}
+
+log() {
+  local f="$S/log"
+  printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$(clean "$*")" >> "$f" 2>/dev/null
+  if [ "$(wc -l < "$f" 2>/dev/null || echo 0)" -gt 5000 ]; then
+    tail -n 2000 "$f" > "$f.tmp.$$" && mv -f "$f.tmp.$$" "$f"
+  fi
+}
+
+# A short mutex around every change to the state. Held for milliseconds.
+lock() {
+  local m="$S/.mutex" p age
+  until mkdir "$m" 2>/dev/null; do
+    p=$(cat "$m/pid" 2>/dev/null)
+    if [ -n "$p" ] && ! kill -0 "$p" 2>/dev/null; then rm -rf "$m"; continue; fi
+    age=$(( $(now) - $(stat -f %m "$m" 2>/dev/null || now) ))
+    if [ "$age" -gt 30 ]; then rm -rf "$m"; continue; fi
+    sleep 0.05
+  done
+  echo $$ > "$m/pid"
+}
+unlock() { rm -rf "$S/.mutex"; }
+
+simctl() { if [ -n "${IOS_Q_SIMCTL:-}" ]; then "$IOS_Q_SIMCTL" "$@"; else xcrun simctl "$@"; fi; }
+
+# "udid|state|name" for every available simulator
+sim_list() {
+  simctl list devices available 2>/dev/null \
+    | sed -nE 's/^ +(.*) \(([0-9A-Fa-f-]{36})\) \(([^)]*)\).*$/\2|\3|\1/p'
+}
+booted_count() { sim_list | awk -F'|' '$2=="Booted" || $2=="Booting" {n++} END {print n+0}'; }
+
+read_load() {
+  if [ -n "${IOS_Q_TEST_LOAD_FILE:-}" ]; then LOAD1=$(cat "$IOS_Q_TEST_LOAD_FILE" 2>/dev/null || echo 0)
+  elif [ -n "${IOS_Q_TEST_LOAD:-}" ]; then LOAD1=$IOS_Q_TEST_LOAD
+  else
+    # shellcheck disable=SC2046
+    set -- $(sysctl -n vm.loadavg 2>/dev/null)
+    LOAD1=${2:-0}
+  fi
+}
+read_free() {
+  if [ -n "${IOS_Q_TEST_FREE_MB_FILE:-}" ]; then FREE_MB=$(cat "$IOS_Q_TEST_FREE_MB_FILE" 2>/dev/null || echo 99999)
+  elif [ -n "${IOS_Q_TEST_FREE_MB:-}" ]; then FREE_MB=$IOS_Q_TEST_FREE_MB
+  else
+    # free + inactive + speculative + purgeable pages: what macOS hands out without swapping
+    FREE_MB=$(vm_stat 2>/dev/null | awk '
+      /page size of/ { for (i = 1; i <= NF; i++) if ($i == "of") ps = $(i + 1) }
+      /^Pages free/ { f = $3 } /^Pages inactive/ { n = $3 }
+      /^Pages speculative/ { s = $3 } /^Pages purgeable/ { p = $3 }
+      END { if (!ps) ps = 16384; printf "%d", (f + n + s + p) * ps / 1048576 }')
+  fi
+}
+gt() { awk -v a="$1" -v b="$2" 'BEGIN { exit !(a + 0 > b + 0) }'; }
+
+is_priority() {   # who
+  local f="$S/priority/$(safe_name "$1")" until
+  [ -f "$f" ] || return 1
+  until=$(cat "$f" 2>/dev/null || echo 0)
+  [ "$until" -gt "$(now)" ]
+}
+
+legacy_holder() {   # prints who holds the old lock, if a process outside ios-q does
+  [ -n "$LEGACY" ] && [ -d "$LEGACY" ] || return 1
+  [ -f "$LEGACY/ios-q-lease" ] && return 1
+  echo "$(cat "$LEGACY/who" 2>/dev/null || echo unknown) (old lock)"
+}
+
+# --------------------------------------------------------------- the reaper --
+# Runs inside the mutex, on every call and on every poll of every waiter, so a
+# lease never outlives its holder by more than a few seconds while anyone waits.
+
+release_file() {   # lease file, reason
+  local f=$1 why=$2
+  kv_load "$f" || return 0
+  rm -f "$f"
+  if [ "$R_legacy" = 1 ] && [ -n "$LEGACY" ] && [ "$(cat "$LEGACY/ios-q-lease" 2>/dev/null)" = "$R_id" ]; then
+    rm -rf "$LEGACY"
+  fi
+  log "release $R_lane who=$R_who lease=$R_id held=$(fmt_dur $(( $(now) - R_since ))) $why"
+}
+
+reap() {
+  local f t; t=$(now)
+  for f in "$S/leases/"*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.tmp.*) continue ;; esac
+    kv_load "$f" || continue
+    if ! alive "$R_pid" "$R_pstart"; then
+      say "released $R_lane of $R_who: its process ($R_pid) has ended"
+      release_file "$f" "reaped: holder gone"
+    elif [ -n "$R_until" ] && [ "$R_until" -gt 0 ] && [ "$t" -gt "$R_until" ]; then
+      say "released $R_lane of $R_who: its --max ran out at $(clock "$R_until")"
+      release_file "$f" "reaped: --max ran out"
+    elif [ "$R_legacy" = 1 ] && [ -n "$LEGACY" ] && [ -d "$LEGACY" ]; then
+      touch "$LEGACY"   # keeps an old script's 45-minute stale rule off a live lease
+    fi
+  done
+  for f in "$S/waiters/"*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.tmp.*) continue ;; esac
+    kv_load "$f" || continue
+    alive "$R_pid" || rm -f "$f"
+  done
+  for f in "$S/priority/"*; do
+    [ -f "$f" ] || continue
+    [ "$(cat "$f" 2>/dev/null || echo 0)" -gt "$t" ] || rm -f "$f"
+  done
+  if [ -n "$LEGACY" ] && [ -d "$LEGACY" ]; then
+    if [ -f "$LEGACY/ios-q-lease" ]; then
+      ls "$S/leases/"*".$(cat "$LEGACY/ios-q-lease" 2>/dev/null)" >/dev/null 2>&1 || rm -rf "$LEGACY"
+    elif [ $(( t - $(stat -f %m "$LEGACY" 2>/dev/null || echo "$t") )) -gt "$LEGACY_STALE" ]; then
+      say "cleared the old lock at $LEGACY (held by $(cat "$LEGACY/who" 2>/dev/null) for over $(fmt_dur "$LEGACY_STALE"))"
+      rm -rf "$LEGACY"
+    fi
+  fi
+}
+
+# --------------------------------------------------------------- the queue --
+
+# "prio seq file" for every waiter on a lane, front of the line first
+sorted_waiters() {
+  local f p
+  for f in "$S/waiters/"*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.tmp.*) continue ;; esac
+    kv_load "$f" || continue
+    [ "$R_lane" = "$1" ] || continue
+    if is_priority "$R_who"; then p=0; else p=1; fi
+    echo "$p $R_seq $f"
+  done | sort -n -k1,1 -k2,2
+}
+
+register_waiter() {   # lane who why udid
+  local seq id
+  lock
+  seq=$(( $(cat "$S/seq" 2>/dev/null || echo 0) + 1 )); echo "$seq" > "$S/seq"
+  id="$(now)-$$-$RANDOM"
+  WAITER_FILE="$S/waiters/$(printf %09d "$seq").$id"
+  kv_write "$WAITER_FILE" "id=$id" "lane=$1" "who=$2" "why=$3" "pid=$$" "since=$(now)" "udid=${4:-}" "seq=$seq"
+  unlock
+}
+drop_waiter() { [ -n "${WAITER_FILE:-}" ] && rm -f "$WAITER_FILE"; WAITER_FILE=; }
+
+# Admission by load and memory, checked outside the mutex. Sets A_reason.
+admit() {   # lane who
+  local lane=$1 mult lim n cap
+  A_reason=
+  mult=$(lane_load_mult "$lane")
+  if [ -n "$mult" ] && ! is_priority "$2"; then
+    read_load
+    lim=$(awk -v m="$mult" -v c="$NCPU" 'BEGIN { printf "%g", m * c }')
+    gt "$LOAD1" "$lim" && A_reason="load $LOAD1 is over $lim (${mult}x $NCPU cores)"
+  fi
+  if lane_mem_gate "$lane"; then
+    read_free
+    if [ "$FREE_MB" -lt "$MIN_FREE_MB" ]; then
+      A_reason="${A_reason:+$A_reason; }free memory $(awk -v m="$FREE_MB" 'BEGIN { printf "%.1f", m / 1024 }') GB is under $((MIN_FREE_MB / 1024)) GB"
+    fi
+  fi
+  if [ "$lane" = boot ]; then
+    cap=$BOOTED_MAX; is_priority "$2" && cap=$BOOTED_MAX_PRIORITY
+    n=$(booted_count)
+    [ "$n" -ge "$cap" ] && A_reason="${A_reason:+$A_reason; }$n simulators are booted (at most $cap; $BOOTED_MAX_PRIORITY when the user is waiting)"
+  fi
+  [ -z "$A_reason" ]
+}
+
+# Inside the mutex: may the waiter in file $2 take lane $1 now? Sets D_ok,
+# D_reason, D_place, D_ahead, D_holders.
+decide() {
+  local lane=$1 me=$2 my_udid=$3 my_pid=$4 my_root=$5 width held=0 busy=" " f p seq free
+  D_ok=0; D_reason=; D_place=1; D_ahead=; D_holders=
+  width=$(lane_width "$lane")
+  for f in "$S/leases/$lane".*; do
+    [ -f "$f" ] || continue
+    kv_load "$f" || continue
+    held=$((held + 1))
+    [ -n "$R_udid" ] && busy="$busy$R_udid "
+    D_holders="${D_holders:+$D_holders, }$R_who \"$R_why\" ($(fmt_dur $(( $(now) - R_since ))) of $(fmt_dur $(( R_until - R_since ))))"
+    if [ "$lane" = build ] && [ "$width" -gt 1 ] && [ -n "$my_root" ] && [ "$R_root" = "$my_root" ]; then
+      D_reason="a build of this copy is running ($R_who); two builds must not share one DerivedData"
+    fi
+  done
+  if [ "$lane" = build ] && legacy_holder >/dev/null; then
+    held=$((held + 1))
+    D_holders="${D_holders:+$D_holders, }$(legacy_holder)"
+  fi
+  if [ "$lane" = maestro ]; then
+    for f in "$S/leases/sim".*; do
+      [ -f "$f" ] || continue
+      kv_load "$f" || continue
+      # your own sim lease does not block your own Maestro run on it
+      { [ "$R_pid" = "$my_pid" ] || [ "$R_pid" = "$T_hp" ] || [ "$R_who" = "$T_who" ]; } && continue
+      busy="$busy$R_udid "
+      [ -n "$my_udid" ] && [ "$R_udid" = "$my_udid" ] && D_reason="simulator $my_udid is lent to $R_who"
+    done
+  fi
+  free=$((width - held))
+  while read -r p seq f; do
+    [ "$f" = "$me" ] && break
+    kv_load "$f" || continue
+    D_place=$((D_place + 1)); D_ahead="${D_ahead:+$D_ahead, }$R_who"
+    if [ -n "$R_udid" ]; then
+      case "$busy" in *" $R_udid "*) continue ;; esac
+      busy="$busy$R_udid "
+    fi
+    free=$((free - 1))
+  done <<EOF
+$(sorted_waiters "$lane")
+EOF
+  if [ -n "$D_reason" ]; then return; fi
+  if [ -n "$my_udid" ]; then
+    case "$busy" in *" $my_udid "*) D_reason="simulator $my_udid is in use"; return ;; esac
+  fi
+  if [ "$free" -le 0 ]; then D_reason="lane is full (width $width)"; return; fi
+  D_ok=1
+}
+
+# Take a lane, waiting as long as it takes. Uses T_* globals; sets LEASE_FILE.
+take_lane() {
+  local lane=$T_lane started last=0 deadline=0 wait_reason t id
+  started=$(now)
+  [ "$T_wait" -gt 0 ] && deadline=$((started + T_wait))
+  register_waiter "$lane" "$T_who" "$T_why" "$T_udid"
+  while :; do
+    admit "$lane" "$T_who"; wait_reason=$A_reason
+    lock
+    reap
+    decide "$lane" "$WAITER_FILE" "$T_udid" "$T_pid" "$T_root"
+    if [ "$D_ok" = 1 ] && [ -z "$wait_reason" ]; then
+      if [ "$lane" = build ] && [ -n "$LEGACY" ] && ! mkdir "$LEGACY" 2>/dev/null; then
+        wait_reason="the old lock at $LEGACY was just taken"
+      else
+        t=$(now); id="$t-$$-$RANDOM"
+        LEASE_ID="$lane.$id"; LEASE_FILE="$S/leases/$LEASE_ID"
+        local legacy=0
+        if [ "$lane" = build ] && [ -n "$LEGACY" ]; then
+          echo "$T_who" > "$LEGACY/who"; echo "$id" > "$LEGACY/ios-q-lease"; legacy=1
+        fi
+        kv_write "$LEASE_FILE" "id=$id" "lane=$lane" "who=$T_who" "why=$T_why" "pid=$T_pid" \
+          "pstart=$T_pstart" "since=$t" "until=$((t + T_max))" "udid=$T_udid" "root=$T_root" "legacy=$legacy"
+        drop_waiter
+        unlock
+        log "grant $lane who=$T_who why=\"$T_why\" lease=$id pid=$T_pid waited=$(fmt_dur $((t - started)))"
+        say "$lane is yours, $T_who (until $(clock $((t + T_max))); waited $(fmt_dur $((t - started))))"
+        return 0
+      fi
+    else
+      wait_reason="${D_reason}${wait_reason:+${D_reason:+; }$wait_reason}"
+    fi
+    unlock
+    t=$(now)
+    if [ "$last" = 0 ] || [ $((t - last)) -ge "$REPORT_EVERY" ]; then
+      last=$t
+      say "[$(date +%H:%M)] waiting for $lane, $(ordinal "$D_place") in line${D_ahead:+ behind $D_ahead}${D_holders:+; held by $D_holders}. Why: $wait_reason. Waiting $(fmt_dur $((t - started)))."
+    fi
+    if [ "$deadline" -gt 0 ] && [ "$t" -ge "$deadline" ]; then
+      drop_waiter
+      say "gave up on $lane after $(fmt_dur $((t - started))) (--wait)"
+      return 3
+    fi
+    sleep "$POLL"
+  done
+}
+
+# ---------------------------------------------------------------- commands --
+
+usage() {
+  cat <<EOF
+ios-q $IOS_Q_VERSION: lanes for iOS builds, simulators and tests on a shared Mac
+
+  ios-q take <lane> --who <name> --why <text> [--max 30m] [--udid U] [--wait 10m] [--pid P]
+        wait for a place in the lane, print it every minute, then hold it until
+        'release', the end of --max, or the end of the process that took it
+  ios-q run <lane> --who <name> --why <text> [--max 30m] [--udid U] -- <command...>
+        take, run the command, release whatever happens (exit, error, Ctrl-C)
+  ios-q sim <project> --who <name> --why <text> [--max 60m] [--no-boot]
+        lend the project's booted simulator and a Metro port; prints
+        export IOS_Q_UDID=… IOS_Q_PORT=… IOS_Q_LEASE=… (use with eval)
+  ios-q release [<lease> | <lane>] [--who <name>] [--any-holder]
+        end your leases (all of them, or one lane's, or one lease)
+  ios-q status [--json]    leases, waiters, priorities, load and memory
+  ios-q who [<lane>]       who holds a lane (or every lane); "free" if nobody
+  ios-q prioritize <who> [--for 60m]   the user is waiting on <who>: its takes
+        go to the front, skip the load gate and may boot a 4th simulator.
+        For the orchestrator only; an agent never calls this for itself.
+  ios-q unprioritize <who>
+  ios-q reap               release leases whose holder is gone (every call does this)
+
+lanes: build (1)  boot (1; ≤$BOOTED_MAX booted)  maestro (2; 1 per simulator)  heavy (1)  device (1)
+state: $S
+EOF
+}
+
+parse_take_opts() {   # sets T_*; leaves the command (after --) in CMD
+  T_who=; T_why=; T_max=; T_udid=; T_wait=0; T_pid=; T_root=; NO_BOOT=0
+  CMD=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --who) T_who=$(clean "${2:-}"); shift 2 ;;
+      --why) T_why=$(clean "${2:-}"); shift 2 ;;
+      --max) T_max=$(parse_dur "${2:-}") || die "--max takes 30m, 2h, 90s"; shift 2 ;;
+      --udid) T_udid=${2:-}; shift 2 ;;
+      --wait) T_wait=$(parse_dur "${2:-}") || die "--wait takes 10m, 1h"; shift 2 ;;
+      --pid) T_pid=${2:-}; shift 2 ;;
+      --root) T_root=${2:-}; shift 2 ;;
+      --no-boot) NO_BOOT=1; shift ;;
+      --user-waiting) die "--user-waiting is not an agent's flag; the orchestrator runs 'ios-q prioritize <who>'" ;;
+      --) shift; CMD=("$@"); return 0 ;;
+      *) die "unknown option: $1 (see ios-q help)" ;;
+    esac
+  done
+}
+
+finish_take_opts() {   # lane
+  [ -n "$T_who" ] || die "--who <your name or card code> is required"
+  [ -n "$T_why" ] || die "--why <what for> is required"
+  [ -n "$T_max" ] || T_max=$(parse_dur "$(lane_default_max "$1")")
+  T_hp=$(holder_pid)
+  [ -n "$T_pid" ] || T_pid=$T_hp
+  alive "$T_pid" || die "process $T_pid is not running"
+  T_pstart=$(pstart_of "$T_pid")
+  [ -n "$T_root" ] || T_root=$(copy_root)
+}
+
+cmd_take() {
+  local lane=${1:-}; shift || true
+  is_lane "$lane" || die "take <lane>: one of $LANES"
+  parse_take_opts "$@"; T_lane=$lane; finish_take_opts "$lane"
+  trap 'drop_waiter; exit 130' INT; trap 'drop_waiter; exit 143' TERM HUP; trap 'drop_waiter' EXIT
+  take_lane || exit $?
+  echo "export IOS_Q_LEASE='$LEASE_ID'"
+  if [ "$lane" = build ]; then
+    echo "export EXPO_CUSTOM_BUILD_ROOT='$T_root'"
+    say "build politely: EXPO_CUSTOM_BUILD_ROOT=$T_root taskpolicy -c utility xcodebuild -jobs $JOBS … (or use 'ios-q run build')"
+  fi
+  say "release with: $ME release $LEASE_ID"
+}
+
+kill_tree() {   # signal pid
+  local c
+  for c in $(pgrep -P "$2" 2>/dev/null); do kill_tree "$1" "$c"; done
+  kill -"$1" "$2" 2>/dev/null
+}
+
+RUN_CHILD=; RUN_SIG=; RUN_WD=
+run_cleanup() {
+  [ -n "$RUN_WD" ] && { kill_tree TERM "$RUN_WD"; RUN_WD=; }
+  if [ -n "${LEASE_FILE:-}" ] && [ -f "$LEASE_FILE" ]; then
+    lock; release_file "$LEASE_FILE" "run ended${RUN_SIG:+ by SIG$RUN_SIG}"; unlock
+    say "released $T_lane ($T_who)"
+  fi
+  LEASE_FILE=
+  drop_waiter
+}
+run_signal() {   # INT|TERM|HUP
+  RUN_SIG=$1
+  if [ -z "$RUN_CHILD" ]; then run_cleanup; trap - EXIT; [ "$1" = INT ] && exit 130; exit 143; fi
+  say "stopping the command (SIG$1)"
+  if [ "$1" = INT ]; then kill -INT "$RUN_CHILD" 2>/dev/null; else kill_tree TERM "$RUN_CHILD"; fi
+}
+
+cmd_run() {
+  local lane=${1:-} rc i a has_jobs=0 has_index=0 t0 waited
+  shift || true
+  is_lane "$lane" || die "run <lane>: one of $LANES"
+  parse_take_opts "$@"
+  [ ${#CMD[@]} -gt 0 ] || die "run $lane … -- <command>: the command is missing"
+  T_lane=$lane
+  [ -n "$T_pid" ] || T_pid=$$
+  # maestro --udid X / --device X names the simulator this run drives
+  if [ "$lane" = maestro ] && [ -z "$T_udid" ]; then
+    for ((i = 0; i < ${#CMD[@]}; i++)); do
+      case "${CMD[$i]}" in --udid|--device) T_udid=${CMD[$((i + 1))]:-} ;; --udid=*|--device=*) T_udid=${CMD[$i]#*=} ;; esac
+    done
+  fi
+  finish_take_opts "$lane"
+  trap 'run_signal INT' INT; trap 'run_signal TERM' TERM; trap 'run_signal HUP' HUP; trap 'run_cleanup' EXIT
+  take_lane || exit $?
+
+  if [ "$lane" = build ]; then
+    export EXPO_CUSTOM_BUILD_ROOT="${EXPO_CUSTOM_BUILD_ROOT:-$T_root}"
+    # one ccache config for every copy (base_dir, hash_dir); see references/build-caches.md
+    [ -n "${IOS_Q_CCACHE_CONFIGPATH:-}" ] && export CCACHE_CONFIGPATH="${CCACHE_CONFIGPATH:-$IOS_Q_CCACHE_CONFIGPATH}"
+    if [ "${CMD[0]##*/}" = xcodebuild ]; then
+      for a in "${CMD[@]}"; do
+        case "$a" in -jobs) has_jobs=1 ;; COMPILER_INDEX_STORE_ENABLE=*) has_index=1 ;; esac
+      done
+      [ "$has_jobs" = 1 ] || CMD+=(-jobs "$JOBS")
+      [ "$has_index" = 1 ] || CMD+=(COMPILER_INDEX_STORE_ENABLE=NO)
+    fi
+    if [ "$POLITE" = 1 ] && [ -x /usr/sbin/taskpolicy ]; then CMD=(/usr/sbin/taskpolicy -c utility "${CMD[@]}"); fi
+  fi
+
+  # A background job ignores Ctrl-C in a script; perl puts the default back so
+  # the command stops when the user (or the agent's harness) interrupts.
+  t0=$(now)
+  if [ -x /usr/bin/perl ]; then
+    /usr/bin/perl -e '$SIG{INT}="DEFAULT"; $SIG{QUIT}="DEFAULT"; exec { $ARGV[0] } @ARGV or die "ios-q: cannot run $ARGV[0]: $!\n"' -- "${CMD[@]}" <&0 &
+  else
+    "${CMD[@]}" <&0 &
+  fi
+  RUN_CHILD=$!
+  if [ "$T_max" -gt 0 ]; then
+    ( sleep "$T_max"; echo "$ME: $lane: --max of $(fmt_dur "$T_max") reached, stopping the command" >&2
+      kill_tree TERM "$RUN_CHILD"; sleep 15; kill_tree KILL "$RUN_CHILD" ) &
+    RUN_WD=$!
+  fi
+  rc=0
+  while :; do
+    wait "$RUN_CHILD"; rc=$?
+    kill -0 "$RUN_CHILD" 2>/dev/null || break
+    # interrupted by a trap: give the command 15 s to stop, then force it
+    if [ -n "$RUN_SIG" ]; then
+      for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do kill -0 "$RUN_CHILD" 2>/dev/null || break; sleep 1; done
+      kill -0 "$RUN_CHILD" 2>/dev/null && kill_tree KILL "$RUN_CHILD"
+    fi
+  done
+  RUN_CHILD=
+  waited=$(fmt_dur $(( $(now) - t0 )))
+  run_cleanup; trap - EXIT
+  case "$RUN_SIG" in INT) exit 130 ;; TERM|HUP) exit 143 ;; esac
+  [ "$rc" = 0 ] || say "$lane: the command exited $rc after $waited"
+  exit "$rc"
+}
+
+pick_port() {   # inside the mutex
+  local used=" " f p
+  for f in "$S/leases/sim".*; do
+    [ -f "$f" ] || continue
+    kv_load "$f" && used="$used$R_port "
+  done
+  p=$((METRO_BASE + 1))
+  while :; do
+    case "$used" in *" $p "*) p=$((p + 1)); continue ;; esac
+    if [ -z "${IOS_Q_TEST_NO_PORT_CHECK:-}" ] && lsof -nP -iTCP:"$p" -sTCP:LISTEN -t >/dev/null 2>&1; then p=$((p + 1)); continue; fi
+    echo "$p"; return
+  done
+}
+
+project_sims() {   # project → "udid|state|name" lines, pool order
+  local p; p=$(lower "$1")
+  sim_list | awk -F'|' -v p="$p" -v mode="$SIM_MATCH" '
+    { n = tolower($3); lp = length(p)
+      if (n == p) { print "0|" $0; next }
+      if (length(n) == lp + 2 && substr(n, 1, lp + 1) == p " " && substr(n, lp + 2, 1) ~ /[a-z]/) { print "1|" $0; next }
+      if (mode == "prefix" && substr(n, 1, lp + 1) == p " ") print "2|" $0 }' \
+    | sort -t'|' -k1,1 -k4,4 | cut -d'|' -f2-
+}
+
+cmd_sim() {
+  local project=${1:-} lane sims booted free_list shut cand t started last=0 deadline=0 reason udid name port n cap
+  shift || true
+  [ -n "$project" ] && [ "${project#-}" = "$project" ] || die "sim <project>: name the project"
+  parse_take_opts "$@"; T_lane=sim; finish_take_opts sim
+  lane="sim:$(lower "$project")"
+  started=$(now); [ "$T_wait" -gt 0 ] && deadline=$((started + T_wait))
+  trap 'drop_waiter; exit 130' INT; trap 'drop_waiter; exit 143' TERM HUP; trap 'drop_waiter' EXIT
+  register_waiter "$lane" "$T_who" "$T_why" ""
+  while :; do
+    sims=$(project_sims "$project")
+    if [ -z "$sims" ]; then
+      drop_waiter
+      say "no simulator for '$project'. The pool is one simulator per project, named for it."
+      say "create it once (this does not boot it): xcrun simctl create \"$project\" \"iPhone 17 Pro\""
+      say "a second, for two phases testing at once, is named \"$project B\"."
+      exit 4
+    fi
+    reason=
+    lock
+    reap
+    # booted simulators of this project nobody holds
+    local busy=" " f
+    for f in "$S/leases/sim".* "$S/leases/maestro".* "$S/leases/boot".*; do
+      [ -f "$f" ] || continue
+      kv_load "$f" && [ -n "$R_udid" ] && busy="$busy$R_udid "
+    done
+    free_list=; shut=
+    while IFS='|' read -r udid st name; do
+      [ -n "$udid" ] || continue
+      case "$busy" in *" $udid "*) continue ;; esac
+      if [ "$st" = Booted ]; then free_list="$free_list$udid|$name
+"
+      elif [ "$st" = Shutdown ] && [ -z "$shut" ]; then shut="$udid|$name"; fi
+    done <<EOF
+$sims
+EOF
+    n=$(printf '%s' "$free_list" | grep -c . || true)
+    D_place=1; D_ahead=
+    while read -r p seq f; do
+      [ "$f" = "$WAITER_FILE" ] && break
+      kv_load "$f" || continue
+      D_place=$((D_place + 1)); D_ahead="${D_ahead:+$D_ahead, }$R_who"
+    done <<EOF
+$(sorted_waiters "$lane")
+EOF
+    if [ "$n" -ge "$D_place" ]; then
+      cand=$(printf '%s' "$free_list" | sed -n "${D_place}p")
+      udid=${cand%%|*}; name=${cand#*|}
+      port=$(pick_port)
+      t=$(now); LEASE_ID="sim.$t-$$-$RANDOM"; LEASE_FILE="$S/leases/$LEASE_ID"
+      kv_write "$LEASE_FILE" "id=${LEASE_ID#sim.}" "lane=sim" "who=$T_who" "why=$T_why" "pid=$T_pid" "pstart=$T_pstart" \
+        "since=$t" "until=$((t + T_max))" "udid=$udid" "port=$port" "project=$project" "name=$name" "root=$T_root"
+      drop_waiter; unlock
+      log "grant sim who=$T_who project=$project udid=$udid port=$port lease=${LEASE_ID#sim.}"
+      sim_granted "$udid" "$port" "$name"
+      return 0
+    fi
+    # Nothing free. The first waiter with no simulator boots the next one of
+    # the pool, if the boot lane and the booted ceiling allow it.
+    if [ "$NO_BOOT" = 0 ] && [ -n "$shut" ] && [ "$D_place" = $((n + 1)) ] && ! ls "$S/leases/boot".* >/dev/null 2>&1 \
+       && [ -z "$(sorted_waiters boot)" ]; then
+      unlock
+      if admit boot "$T_who"; then
+        lock; reap
+        if ! ls "$S/leases/boot".* >/dev/null 2>&1; then
+          udid=${shut%%|*}; name=${shut#*|}
+          t=$(now); local boot_file="$S/leases/boot.$t-$$-$RANDOM"
+          kv_write "$boot_file" "id=${boot_file##*/boot.}" "lane=boot" "who=$T_who" "why=boot $name for $T_why" "pid=$$" \
+            "pstart=$(pstart_of $$)" "since=$t" "until=$((t + 600))" "udid=$udid" "root=$T_root"
+          unlock
+          say "booting '$name' ($udid) for $T_who; it stays booted for the next lease"
+          log "boot $udid name=$name who=$T_who"
+          if sim_boot "$udid"; then
+            lock
+            rm -f "$boot_file"
+            port=$(pick_port); t=$(now); LEASE_ID="sim.$t-$$-$RANDOM"; LEASE_FILE="$S/leases/$LEASE_ID"
+            kv_write "$LEASE_FILE" "id=${LEASE_ID#sim.}" "lane=sim" "who=$T_who" "why=$T_why" "pid=$T_pid" "pstart=$T_pstart" \
+              "since=$t" "until=$((t + T_max))" "udid=$udid" "port=$port" "project=$project" "name=$name" "root=$T_root"
+            drop_waiter; unlock
+            log "grant sim who=$T_who project=$project udid=$udid port=$port lease=${LEASE_ID#sim.} booted"
+            sim_granted "$udid" "$port" "$name"
+            return 0
+          fi
+          lock; rm -f "$boot_file"; unlock
+          drop_waiter
+          say "'$name' did not boot. Do not erase or delete it; tell the user."
+          exit 5
+        fi
+        unlock
+      fi
+      reason=$A_reason
+    else
+      unlock
+    fi
+    t=$(now)
+    if [ "$last" = 0 ] || [ $((t - last)) -ge "$REPORT_EVERY" ]; then
+      last=$t
+      if [ -z "$reason" ]; then
+        if [ -n "$shut" ] && [ "$NO_BOOT" = 0 ]; then reason="every booted '$project' simulator is lent out; '${shut#*|}' boots when the boot lane is free"
+        else reason="every '$project' simulator is lent out"; fi
+      fi
+      say "[$(date +%H:%M)] waiting for a '$project' simulator, $(ordinal "$D_place") in line${D_ahead:+ behind $D_ahead}. Why: $reason. Waiting $(fmt_dur $((t - started)))."
+    fi
+    if [ "$deadline" -gt 0 ] && [ "$t" -ge "$deadline" ]; then drop_waiter; say "gave up after $(fmt_dur $((t - started))) (--wait)"; exit 3; fi
+    sleep "$POLL"
+  done
+}
+
+sim_boot() {   # udid: boot, then wait until it is usable (5 min at most)
+  local u=$1 w i
+  simctl boot "$u" >/dev/null 2>&1   # "already booted" is fine
+  simctl bootstatus "$u" -b >/dev/null 2>&1 &
+  w=$!
+  for ((i = 0; i < 300; i++)); do kill -0 "$w" 2>/dev/null || break; sleep 1; done
+  if kill -0 "$w" 2>/dev/null; then kill "$w" 2>/dev/null; return 1; fi
+  wait "$w"
+}
+
+sim_granted() {   # udid port name
+  echo "export IOS_Q_LEASE='$LEASE_ID'"
+  echo "export IOS_Q_UDID='$1'"
+  echo "export IOS_Q_PORT='$2'"
+  echo "export IOS_Q_SIM_NAME='$3'"
+  say "simulator '$3' ($1) is yours, $T_who, with Metro port $2 (until $(clock $(( $(now) + T_max ))))."
+  say "metro:  npx expo start --dev-client --port $2 --max-workers 2   (from your own copy)"
+  say "open:   xcrun simctl openurl $1 \"<scheme>://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A$2&disableOnboarding=1\""
+  say "reset with 'xcrun simctl terminate $1 <bundle id>' or clearState in the flow; never shutdown or erase. Release: $ME release $LEASE_ID"
+}
+
+cmd_release() {
+  local target='' who='' any=0 legacy=0 hp f n=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --who) who=${2:-}; shift 2 ;;
+      --any-holder) any=1; shift ;;
+      --legacy) legacy=1; shift ;;
+      --pid) IOS_Q_HOLDER_PID=${2:-}; shift 2 ;;
+      -*) die "unknown option: $1" ;;
+      *) target=$1; shift ;;
+    esac
+  done
+  [ "$any" = 1 ] && [ -z "$who" ] && die "--any-holder needs --who <name>"
+  lock
+  reap
+  if [ -n "$target" ] && [ -f "$S/leases/$target" ]; then
+    kv_load "$S/leases/$target"; release_file "$S/leases/$target" "released"; unlock
+    say "released $R_lane ($R_who)"; return 0
+  fi
+  if [ -n "$target" ] && ! is_lane "$target" && [ "$target" != sim ]; then unlock; die "no lease or lane '$target' (see ios-q status)"; fi
+  hp=$(holder_pid)
+  for f in "$S/leases/"*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.tmp.*) continue ;; esac
+    kv_load "$f" || continue
+    [ -z "$target" ] || [ "$R_lane" = "$target" ] || continue
+    [ -z "$who" ] || [ "$R_who" = "$who" ] || continue
+    [ "$any" = 1 ] || [ "$R_pid" = "$hp" ] || continue
+    release_file "$f" "released"; n=$((n + 1))
+    say "released $R_lane ($R_who, held $(fmt_dur $(( $(now) - R_since ))))"
+  done
+  if [ "$n" = 0 ] && [ "$legacy" = 1 ] && { [ -z "$target" ] || [ "$target" = build ]; } && legacy_holder >/dev/null; then
+    say "released the old lock at $LEGACY ($(legacy_holder))"
+    log "release legacy who=$(cat "$LEGACY/who" 2>/dev/null)"
+    rm -rf "$LEGACY"; n=1
+  fi
+  unlock
+  [ "$n" -gt 0 ] || say "nothing of yours to release${target:+ in $target}"
+  return 0
+}
+
+cmd_who() {
+  local lane=${1:-} f out=
+  lock; reap; unlock
+  for f in "$S/leases/"*; do
+    [ -f "$f" ] || continue
+    case "$f" in *.tmp.*) continue ;; esac
+    kv_load "$f" || continue
+    [ -z "$lane" ] || [ "$R_lane" = "$lane" ] || continue
+    if [ -n "$lane" ]; then out="$out$R_who
+"; else out="$out$R_who ($R_lane)
+"; fi
+  done
+  if { [ -z "$lane" ] || [ "$lane" = build ]; } && legacy_holder >/dev/null; then
+    out="$out$(legacy_holder)
+"
+  fi
+  if [ -n "$out" ]; then printf '%s' "$out"; else echo free; fi
+}
+
+cmd_prioritize() {
+  local who='' dur=$PRIORITY_FOR s
+  while [ $# -gt 0 ]; do
+    case "$1" in --for) dur=${2:-}; shift 2 ;; -*) die "unknown option: $1" ;; *) who=$1; shift ;; esac
+  done
+  [ -n "$who" ] || die "prioritize <who> [--for 60m]"
+  s=$(parse_dur "$dur") || die "--for takes 30m, 2h"
+  echo $(( $(now) + s )) > "$S/priority/$(safe_name "$who")"
+  log "prioritize who=$who for=$dur by_pid=$(holder_pid)"
+  say "$who goes to the front of every lane until $(clock $(( $(now) + s )))"
+}
+cmd_unprioritize() {
+  [ -n "${1:-}" ] || die "unprioritize <who>"
+  rm -f "$S/priority/$(safe_name "$1")"; log "unprioritize who=$1"; say "$1 waits its turn again"
+}
+
+waiting_sim_lanes() {
+  local f
+  for f in "$S/waiters/"*; do
+    [ -f "$f" ] && kv_load "$f" || continue
+    case "$R_lane" in sim:*) echo "$R_lane" ;; esac
+  done | sort -u
+}
+
+json_str() { printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"; }
+
+cmd_status() {
+  local json=0 f t lim first booted p seq
+  [ "${1:-}" = --json ] && json=1
+  lock; reap; unlock
+  t=$(now); read_load; read_free
+  if [ "$json" = 1 ]; then
+    printf '{"load1":%s,"cores":%s,"free_mb":%s,"leases":[' "$LOAD1" "$NCPU" "$FREE_MB"
+    first=1
+    for f in "$S/leases/"*; do
+      [ -f "$f" ] || continue; case "$f" in *.tmp.*) continue ;; esac
+      kv_load "$f" || continue
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '{"lease":%s,"lane":%s,"who":%s,"why":%s,"pid":%s,"since":%s,"until":%s,"udid":%s,"port":%s,"project":%s}' \
+        "$(json_str "${f##*/}")" "$(json_str "$R_lane")" "$(json_str "$R_who")" "$(json_str "$R_why")" "${R_pid:-0}" \
+        "${R_since:-0}" "${R_until:-0}" "$(json_str "$R_udid")" "${R_port:-null}" "$(json_str "$R_project")"
+    done
+    printf '],"waiting":['
+    first=1
+    for f in "$S/waiters/"*; do
+      [ -f "$f" ] || continue; case "$f" in *.tmp.*) continue ;; esac
+      kv_load "$f" || continue
+      [ "$first" = 1 ] || printf ','; first=0
+      printf '{"lane":%s,"who":%s,"why":%s,"since":%s,"priority":%s}' "$(json_str "$R_lane")" "$(json_str "$R_who")" \
+        "$(json_str "$R_why")" "${R_since:-0}" "$(is_priority "$R_who" && echo true || echo false)"
+    done
+    printf '],"legacy":%s}\n' "$(if h=$(legacy_holder); then json_str "$h"; else echo null; fi)"
+    return
+  fi
+  booted=$(booted_count)
+  lim=$(awk -v c="$NCPU" 'BEGIN { printf "%g/%g", 2 * c, 4 * c }')
+  printf 'ios-q  load %s (build ≤%s maestro ≤%s)  free %s GB (floor %s)  booted %s/%s\n\n' \
+    "$LOAD1" "${lim%/*}" "${lim#*/}" "$(awk -v m="$FREE_MB" 'BEGIN { printf "%.1f", m / 1024 }')" \
+    "$((MIN_FREE_MB / 1024))" "$booted" "$BOOTED_MAX"
+  printf '%-8s %-14s %-9s %-7s %-34s %s\n' LANE WHO HELD PID WHY "SIMULATOR / PORT"
+  first=1
+  for lane in $LANES sim; do
+    for f in "$S/leases/$lane".*; do
+      [ -f "$f" ] || continue
+      kv_load "$f" || continue; first=0
+      printf '%-8s %-14s %-9s %-7s %-34s %s\n' "$lane" "$R_who" "$(fmt_dur $((t - R_since)))/$(fmt_dur $((R_until - R_since)))" \
+        "$R_pid" "$(printf '%.34s' "$R_why")" "${R_name:+$R_name }${R_udid:+${R_udid:0:8} }${R_port}"
+    done
+  done
+  if h=$(legacy_holder); then printf '%-8s %-14s\n' build "$h"; first=0; fi
+  [ "$first" = 1 ] && echo "(no leases)"
+  echo
+  first=1
+  for lane in $LANES $(waiting_sim_lanes); do
+    while read -r p seq f; do
+      [ -n "$f" ] || continue
+      kv_load "$f" || continue
+      [ "$first" = 1 ] && echo "waiting:"; first=0
+      printf '  %-12s %-14s %-8s %s%s\n' "$lane" "$R_who" "$(fmt_dur $((t - R_since)))" "$R_why" "$([ "$p" = 0 ] && echo '  [user waiting]')"
+    done <<EOF
+$(sorted_waiters "$lane")
+EOF
+  done
+  [ "$first" = 1 ] && echo "nobody waiting"
+  for f in "$S/priority/"*; do
+    [ -f "$f" ] || continue
+    echo "priority: ${f##*/} until $(clock "$(cat "$f")")"
+  done
+  return 0
+}
+
+# -------------------------------------------------------------------- main --
+
+cmd=${1:-help}; shift || true
+case "$cmd" in
+  take) cmd_take "$@" ;;
+  run) cmd_run "$@" ;;
+  sim) cmd_sim "$@" ;;
+  release) cmd_release "$@" ;;
+  status) cmd_status "$@" ;;
+  who) cmd_who "$@" ;;
+  prioritize) cmd_prioritize "$@" ;;
+  unprioritize) cmd_unprioritize "$@" ;;
+  reap) lock; reap; unlock ;;
+  version|--version) echo "ios-q $IOS_Q_VERSION" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

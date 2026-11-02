@@ -1,0 +1,8 @@
+{
+  "name": "expo-ios-agents",
+  "description": "Expo / React Native iOS with several coding agents on one Mac: the ios-q lane queue (build, boot, maestro, heavy, device) with waiting in line, a user-is-waiting priority, leases that end with their holder and admission by load and memory; one dev client per native fingerprint with JS through Metro; a leased pool of always-booted simulators; Jest first and Maestro as a tagged smoke set; the iPhone through devicectl; build caches across worktrees; a weekly disk sweep.",
+  "version": "0.1.0",
+  "author": {
+    "name": "tonyjara"
+  }
+}
