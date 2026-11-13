@@ -1,0 +1,8 @@
+{
+  "name": "iracing-livery",
+  "description": "Design iRacing paints (car livery, car_spec spec map, helmet, driver suit) from a brand's design language with scriptable tools: read the template's UV panels, the orientation traps (trunk, hood, mirrored sides), helmet visor clearance, spec channels, file names and folders, leaving the sim's number panels alone, flat preview sheets, the in-sim screenshot loop, and posters turned into a full wrap that still looks like a race car.",
+  "version": "0.1.0",
+  "author": {
+    "name": "tonyjara"
+  }
+}

@@ -41,6 +41,11 @@
       "name": "expo-ios-agents",
       "source": "./plugins/expo-ios-agents",
       "description": "Expo / React Native iOS with several agents on one Mac: an ios-q lane queue instead of one lock (build, boot, maestro, heavy, device; place in line, user-waiting priority, leases that die with their holder, refusal under load), one dev client per native fingerprint with JS through Metro, a leased pool of always-booted simulators, Jest before a small Maestro smoke set, the iPhone via devicectl, cross-worktree build caches and a weekly disk sweep."
+    },
+    {
+      "name": "iracing-livery",
+      "source": "./plugins/iracing-livery",
+      "description": "iRacing paints from a brand's design language: the car's template and UV panels, orientation traps (trunk, hood, mirrored sides), helmet visor clearance, spec maps, file names and folders, the sim's number panels, flat preview sheets on the wireframe, the in-sim screenshot loop, and a brand's posters as a full wrap that still looks like a race car. Python scripts for mapping, drawing, TGA export, spec maps and previews."
     }
   ]
 }
