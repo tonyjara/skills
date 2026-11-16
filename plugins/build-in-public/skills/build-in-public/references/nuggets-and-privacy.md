@@ -23,26 +23,36 @@ Good, roughly in this order:
    solves, not by its name.
 7. **A before/after** that would work as a screenshot or a clip.
 
-Score each candidate on: surprise (would a builder learn something), proof (a
-number, a diff, a screenshot to show), fit (one of the story lines), and
-safety (how much privacy work it needs). Prefer one strong idea over three
-weak ones from the same project. Mix the projects when the window allows.
+Score each candidate on three things only: surprise (would a builder learn
+something), proof (a number, a diff, a screenshot to show), and safety (how
+much privacy work it needs). Which project it came from, and whether it fits a
+story line, are not in the score.
 
-### The story lines
+### Every project counts
 
-Unless the asset's strategy says otherwise, two lines carry the brand:
+All the projects are fair game, and you never know which one holds the post
+that travels: an events app's calendar edge case, a window manager's bug, a
+video job on a home PC, a marketplace's money flow, a smart-home script.
+Spread the list across the projects worked on in the window:
 
-- **AI coding agents in daily use**: kururu, Kuru, many agents on one Mac,
-  briefs, queues, what agents get wrong and how it was fixed. Real work, not
-  tips.
-- **Payments and invoicing in a small country**: building payment and
-  e-invoicing products in Paraguay (held funds, local card networks, tax
-  invoices). Tell it as infrastructure and a builder's story, not as a schema
-  walkthrough: compliance detail does not travel, the story does.
+- One idea per project first, from each project with a nugget worth one; a
+  second from the same project only when it beats every remaining candidate
+  elsewhere.
+- Volume is not merit. A project with fifty commits gets no more ideas than
+  one with three unless its nuggets are better.
+- A client's project counts too, but only as what the filter below allows:
+  told generically, or held.
+- When the owner names projects, spread within those.
 
-A third that is always fine: **a portfolio built in public** (several small
-products, what shipped, what was killed and why, numbers when the owner shares
-them).
+### Story lines are framing, not a filter
+
+The brand research (and later the asset's strategy) names story lines, such
+as AI coding agents in daily use and payments and invoicing in a small
+country. Use them to frame a post: many nuggets from any project are also an
+agent story (how agents built, tested or broke it) or a small-country story
+(a local payment network, a city's spelling, weak signal at a venue's door).
+Never use them to rank one project's nugget over another's. Tell
+infrastructure and compliance as a builder's story, not a schema walkthrough.
 
 ### Where nuggets hide
 

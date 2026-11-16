@@ -14,7 +14,13 @@ Items whose text names a private project from the config are tagged
   python3 gather.py                      # yesterday and today (the default)
   python3 gather.py --window today       # today | yesterday | recent | week | 3d
   python3 gather.py --since 2026-11-13 --until 2026-11-16
+  python3 gather.py --window week --project pasapy --project "tile bandit"
   python3 gather.py --card KUR-288       # one card's whole body
+
+--project (repeatable) keeps only those projects: a workspace or repo whose
+name starts with it once case, spaces and dashes are ignored ("tile bandit"
+is the Tile Bandit workspace and the tile-bandit repo), and profile-board
+cards and docs that mention it.
 """
 from __future__ import annotations
 
@@ -41,6 +47,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--until", help="YYYY-MM-DD, local time, inclusive (default today)")
     p.add_argument("--home", default=str(DEFAULT_HOME), help="folder with config.md and offered.jsonl")
     p.add_argument("--db", default=str(DEFAULT_DB), help="kururu's database")
+    p.add_argument("--project", action="append", default=[], help="only this project (repeatable); default every project")
     p.add_argument("--card", help="print one card whole, by code (KUR-288) and exit")
     p.add_argument("--no-cards", action="store_true")
     p.add_argument("--no-git", action="store_true")
@@ -130,6 +137,25 @@ def read_offered(home: Path) -> dict[str, str]:
 
 # --- cards ------------------------------------------------------------------
 
+def norm(text: str) -> str:
+    return "".join(ch for ch in text.lower() if ch.isalnum())
+
+
+def is_project(name: str | None, projects: list[str]) -> bool:
+    """A workspace or repo that is one of the asked projects; every one when none were asked."""
+    if not projects:
+        return True
+    n = norm(name or "")
+    return bool(n) and any(n.startswith(p) for p in projects)
+
+
+def mentions(text: str, projects: list[str]) -> bool:
+    if not projects:
+        return True
+    n = norm(text)
+    return any(p in n for p in projects)
+
+
 def card_code(workspace: str | None, number: int) -> str:
     if not workspace:
         return f"#{number}"
@@ -160,10 +186,13 @@ order by coalesce(w.name, ''), max(e.at)
 """
 
 
-def cards(db: sqlite3.Connection, start: dt.datetime, end: dt.datetime, private: dict, offered: dict) -> list[str]:
+def cards(db: sqlite3.Connection, start: dt.datetime, end: dt.datetime, private: dict, offered: dict, projects: list[str]) -> list[str]:
     rows = db.execute(CARDS_SQL, (int(start.timestamp() * 1000), int(end.timestamp() * 1000))).fetchall()
     out, last_ws = [], object()
     for ws, number, column, at, title in rows:
+        # The profile's own board belongs to no project: keep its cards that name one.
+        if not (is_project(ws, projects) if ws else mentions(title, projects)):
+            continue
         if ws != last_ws:
             out.append(f"\n### {ws or 'profile board'}")
             last_ws = ws
@@ -234,7 +263,7 @@ def commits(repo: Path, start: dt.datetime, end: dt.datetime, private: dict, off
 
 # --- docs ---------------------------------------------------------------------
 
-def docs(folders: list[Path], start: dt.datetime, end: dt.datetime, private: dict, offered: dict) -> list[str]:
+def docs(folders: list[Path], start: dt.datetime, end: dt.datetime, private: dict, offered: dict, projects: list[str]) -> list[str]:
     out = []
     for folder in folders:
         if not folder.is_dir():
@@ -251,6 +280,8 @@ def docs(folders: list[Path], start: dt.datetime, end: dt.datetime, private: dic
                 if line.startswith("#"):
                     head = line.lstrip("# ").strip()
                     break
+            if not mentions(f"{rel} {head}", projects):
+                continue
             short = str(path).replace(str(HOME), "~")
             seen = f" [{offered[short]}]" if short in offered else ""
             out.append(f"- {short} {mtime:%m-%d %H:%M} {head}{private_tags(str(rel) + ' ' + head, private)}{seen}")
@@ -270,8 +301,21 @@ def main() -> None:
         return
 
     start, end = window(args)
+    projects = [norm(p) for p in args.project if len(norm(p)) >= 3]
+    if len(projects) != len(args.project):
+        sys.exit("a --project needs at least three letters")
+    if projects:
+        names = [r.name for r in repos(cfg["roots"])]
+        if db:
+            try:
+                names += [w for (w,) in db.execute("select name from workspaces where gone_at is null")]
+            except sqlite3.Error:
+                pass
+        for asked, p in zip(args.project, projects):
+            if not any(norm(n).startswith(p) for n in names):
+                print(f"(no workspace or repo is called {asked!r}; known: {', '.join(sorted(set(names), key=str.lower))})")
     offered = read_offered(home)
-    print(f"# Shipped {start:%Y-%m-%d} to {(end - dt.timedelta(days=1)):%Y-%m-%d} (local time)")
+    print(f"# Shipped {start:%Y-%m-%d} to {(end - dt.timedelta(days=1)):%Y-%m-%d} (local time)" + (f", only {', '.join(args.project)}" if args.project else ""))
     if not (home / "config.md").exists():
         print(f"\n(no config at {home / 'config.md'}: private names are not tagged)")
 
@@ -279,7 +323,7 @@ def main() -> None:
         print("\n## Cards moved to done or review")
         if db:
             try:
-                print("\n".join(cards(db, start, end, cfg["private"], offered)) or "(none)")
+                print("\n".join(cards(db, start, end, cfg["private"], offered, projects)) or "(none)")
             except sqlite3.Error as e:
                 print(f"(database not readable: {e}; use Kuru's cards and card_history tools)")
         else:
@@ -287,7 +331,7 @@ def main() -> None:
 
     if not args.no_git:
         print("\n## Commits")
-        for repo in repos(cfg["roots"]):
+        for repo in (r for r in repos(cfg["roots"]) if is_project(r.name, projects)):
             lines = commits(repo, start, end, cfg["private"], offered)
             if lines:
                 print(f"\n### {repo.name} ({len(lines)}){private_tags(repo.name, cfg['private'])}")
@@ -295,7 +339,7 @@ def main() -> None:
 
     if not args.no_docs:
         print("\n## Reports and research changed")
-        print("\n".join(docs(cfg["docs"], start, end, cfg["private"], offered)) or "(none)")
+        print("\n".join(docs(cfg["docs"], start, end, cfg["private"], offered, projects)) or "(none)")
 
 
 if __name__ == "__main__":
