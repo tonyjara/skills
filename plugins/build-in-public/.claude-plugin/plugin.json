@@ -1,0 +1,6 @@
+{
+  "name": "build-in-public",
+  "description": "Build-in-public digest: mine what was shipped today, yesterday or this week (kururu cards, git commits, reports) for the nuggets a builder audience cares about, filter out clients, people, production data and security, draft X, Bluesky, LinkedIn and YouTube versions, and file them as unscheduled Platypost drafts, with a numbered list that fits a phone.",
+  "version": "0.1.0",
+  "author": { "name": "tonyjara" }
+}

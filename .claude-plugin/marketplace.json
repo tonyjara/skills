@@ -46,6 +46,11 @@
       "name": "iracing-livery",
       "source": "./plugins/iracing-livery",
       "description": "iRacing paints from a brand's design language: the car's template and UV panels, orientation traps (trunk, hood, mirrored sides), helmet visor clearance, spec maps, file names and folders, the sim's number panels, flat preview sheets on the wireframe, the in-sim screenshot loop, and a brand's posters as a full wrap that still looks like a race car. Python scripts for mapping, drawing, TGA export, spec maps and previews."
+    },
+    {
+      "name": "build-in-public",
+      "source": "./plugins/build-in-public",
+      "description": "Build-in-public digest: what was shipped in a day or a week (kururu cards, commits, reports) turned into ranked post ideas, filtered for clients, people and security, drafted for X, Bluesky, LinkedIn and YouTube, and filed as unscheduled Platypost drafts with a phone-sized list."
     }
   ]
 }
